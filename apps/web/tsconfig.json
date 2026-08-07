@@ -1,0 +1,10 @@
+{
+  "extends": "@password-manager/config/tsconfig/react-library.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "noEmit": true,
+    "types": ["vite/client"]
+  },
+  "include": ["src"]
+}

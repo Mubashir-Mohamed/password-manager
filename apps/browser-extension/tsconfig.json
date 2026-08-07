@@ -1,0 +1,3 @@
+{
+  "extends": ["./.wxt/tsconfig.json", "@password-manager/config/tsconfig/react-library.json"]
+}

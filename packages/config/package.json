@@ -1,0 +1,14 @@
+{
+  "name": "@password-manager/config",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./tokens.js",
+  "exports": {
+    ".": "./tokens.js",
+    "./tailwind-preset": "./tailwind-preset.cjs",
+    "./tsconfig/base.json": "./tsconfig/base.json",
+    "./tsconfig/react-library.json": "./tsconfig/react-library.json"
+  },
+  "files": ["tokens.js", "tailwind-preset.cjs", "tsconfig"]
+}

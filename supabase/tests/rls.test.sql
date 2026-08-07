@@ -1,0 +1,134 @@
+-- pgTAP RLS regression suite (build plan §8 "pgTAP — every table must deny
+-- cross-user access, blocking CI gate").
+--
+-- Run locally with the Supabase CLI (requires Docker):
+--   supabase start
+--   supabase test db
+--
+-- The pgtap extension itself isn't available in this sandbox, but every
+-- scenario below was verified for real against a throwaway local Postgres 14
+-- instance (stubbed auth.users/auth.uid() + the real migrations) before this
+-- file was written — including two genuine bugs the manual runs caught:
+--   1. A naive column-level REVOKE on emergency_access was a silent no-op
+--      against Supabase's default blanket table-level GRANT, fixed in
+--      0001_init.sql (revoke table-level, re-grant an explicit column allowlist).
+--   2. profiles.email was client-writable with no binding to auth.users.email,
+--      letting an authenticated user set it to a victim's address and hijack
+--      lookup-public-key/get-kdf-params results aimed at them. Found by a
+--      security review, fixed in 0003_bind_profile_email_to_auth.sql (a
+--      trigger unconditionally overwrites profiles.email from auth.users on
+--      every insert/update, plus a case-insensitive unique index).
+-- Still run this file through pgTAP before trusting it in CI — the scenarios
+-- are confirmed, the pgTAP wrapper syntax itself is not.
+begin;
+select plan(9);
+
+-- Two fake users, inserted directly (bypassing auth.users' normal signup flow
+-- — fine for a schema-level RLS test, since RLS only cares about auth.uid()).
+insert into auth.users (id, email) values
+  ('11111111-1111-1111-1111-111111111111', 'alice@example.com'),
+  ('22222222-2222-2222-2222-222222222222', 'bob@example.com');
+
+insert into public.profiles (id, email, kdf_salt, kdf_memlimit, kdf_opslimit, wrapped_vault_key, public_key, wrapped_private_key)
+values
+  ('11111111-1111-1111-1111-111111111111', 'alice@example.com', 'c2FsdA', 268435456, 3,
+   '{"nonce":"n","ciphertext":"c"}', 'alice-pub', '{"nonce":"n","ciphertext":"c"}'),
+  ('22222222-2222-2222-2222-222222222222', 'bob@example.com', 'c2FsdA', 268435456, 3,
+   '{"nonce":"n","ciphertext":"c"}', 'bob-pub', '{"nonce":"n","ciphertext":"c"}');
+
+-- Act as Alice: create a vault + item.
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated"}';
+
+insert into public.vaults (id, owner_id, name) values
+  ('a1a1a1a1-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111', 'Alice''s Vault');
+
+insert into public.vault_items (id, vault_id, type, wrapped_item_key, content) values
+  ('b1b1b1b1-0000-0000-0000-000000000001', 'a1a1a1a1-0000-0000-0000-000000000001', 'login',
+   '{"nonce":"n","ciphertext":"c"}', '{"nonce":"n","ciphertext":"c","aad":"b1b1b1b1-0000-0000-0000-000000000001:1"}');
+
+select is(
+  (select count(*)::int from public.vault_items),
+  1,
+  'Alice can see her own vault item'
+);
+
+-- Switch to Bob: he should see neither Alice's vault nor her item.
+set local request.jwt.claims = '{"sub":"22222222-2222-2222-2222-222222222222","role":"authenticated"}';
+
+select is(
+  (select count(*)::int from public.vaults where id = 'a1a1a1a1-0000-0000-0000-000000000001'),
+  0,
+  'Bob cannot see Alice''s vault'
+);
+
+select is(
+  (select count(*)::int from public.vault_items where id = 'b1b1b1b1-0000-0000-0000-000000000001'),
+  0,
+  'Bob cannot see Alice''s vault item (not shared)'
+);
+
+select throws_ok(
+  $$ update public.vault_items set favorite = true where id = 'b1b1b1b1-0000-0000-0000-000000000001' $$,
+  null,
+  null,
+  'Bob cannot update Alice''s vault item'
+);
+
+-- Alice shares the item with Bob (read-only) — now Bob should be able to
+-- SELECT the row (still can't decrypt it without his own wrapped key, but
+-- that's a client-side concern, not RLS's).
+set local request.jwt.claims = '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated"}';
+
+insert into public.shared_items (item_id, from_user_id, to_user_id, wrapped_item_key, permission) values
+  ('b1b1b1b1-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111',
+   '22222222-2222-2222-2222-222222222222', '{"nonce":"n","ciphertext":"c"}', 'read');
+
+set local request.jwt.claims = '{"sub":"22222222-2222-2222-2222-222222222222","role":"authenticated"}';
+
+select is(
+  (select count(*)::int from public.vault_items where id = 'b1b1b1b1-0000-0000-0000-000000000001'),
+  1,
+  'Bob CAN see the item once Alice shares it with him'
+);
+
+select throws_ok(
+  $$ update public.vault_items set favorite = true where id = 'b1b1b1b1-0000-0000-0000-000000000001' $$,
+  null,
+  null,
+  'Bob still cannot UPDATE the shared item (read-only share, no write-permission policy branch in Phase 1)'
+);
+
+-- Revoke and confirm access is gone again.
+set local request.jwt.claims = '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated"}';
+update public.shared_items set revoked_at = now()
+  where item_id = 'b1b1b1b1-0000-0000-0000-000000000001' and to_user_id = '22222222-2222-2222-2222-222222222222';
+
+set local request.jwt.claims = '{"sub":"22222222-2222-2222-2222-222222222222","role":"authenticated"}';
+
+select is(
+  (select count(*)::int from public.vault_items where id = 'b1b1b1b1-0000-0000-0000-000000000001'),
+  0,
+  'Bob loses access once the share is revoked'
+);
+
+-- profiles: users can only ever see their own row.
+select is(
+  (select count(*)::int from public.profiles),
+  1,
+  'Bob sees only his own profile row, never Alice''s'
+);
+
+-- Security regression (0003_bind_profile_email_to_auth.sql): Bob cannot spoof
+-- his profiles.email to Alice's address to hijack sharing/get-kdf-params
+-- lookups aimed at her. The sync trigger must silently overwrite it back to
+-- his own auth.users email on every UPDATE, not just at insert time.
+update public.profiles set email = 'alice@example.com' where id = '22222222-2222-2222-2222-222222222222';
+select is(
+  (select email from public.profiles where id = '22222222-2222-2222-2222-222222222222'),
+  'bob@example.com',
+  'Bob cannot spoof his profiles.email to Alice''s — the sync trigger overwrites it back to his real auth.users email'
+);
+
+select * from finish();
+rollback;

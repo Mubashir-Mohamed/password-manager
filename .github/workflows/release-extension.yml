@@ -1,0 +1,37 @@
+name: Release — Browser Extension
+
+on:
+  push:
+    tags: ["extension-v*"]
+  workflow_dispatch:
+
+jobs:
+  build-and-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm --filter @password-manager/browser-extension build
+        env:
+          WXT_SUPABASE_URL: ${{ secrets.PROD_SUPABASE_URL }}
+          WXT_SUPABASE_ANON_KEY: ${{ secrets.PROD_SUPABASE_ANON_KEY }}
+      - run: pnpm --filter @password-manager/browser-extension build:firefox
+        env:
+          WXT_SUPABASE_URL: ${{ secrets.PROD_SUPABASE_URL }}
+          WXT_SUPABASE_ANON_KEY: ${{ secrets.PROD_SUPABASE_ANON_KEY }}
+      - run: pnpm --filter @password-manager/browser-extension zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extension-builds
+          path: apps/browser-extension/.output/*.zip
+
+      # Store submission is manual for Phase 1 (Chrome Web Store, AMO, Edge
+      # Partner Center each need their own API credentials + review lead
+      # time — build plan §7). Automating the upload step is a fast-follow
+      # once those developer accounts exist.

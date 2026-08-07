@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design-doc §2 base tokens not expressible as Tailwind utilities alone. */
+:root {
+  color-scheme: dark light;
+}
+
+body {
+  font-family: "Inter", system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+.font-mono-nums {
+  font-variant-numeric: tabular-nums;
+}

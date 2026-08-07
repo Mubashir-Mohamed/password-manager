@@ -1,0 +1,46 @@
+# electron-builder config — build plan §7 "Windows nsis/portable, macOS
+# universal dmg/zip" + §6 "code signing + notarization for Mac & Windows".
+appId: com.yourorg.passwordmanager
+productName: Password Manager
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist-electron/**/*
+  - ../web/dist/**/*
+extraMetadata:
+  main: dist-electron/main.js
+
+mac:
+  category: public.app-category.utilities
+  target:
+    - target: dmg
+      arch: [universal]
+    - target: zip
+      arch: [universal]
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # Notarization credentials come from env vars (APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD,
+  # APPLE_TEAM_ID) injected by CI — see build plan §3, never committed.
+
+win:
+  target:
+    - target: nsis
+      arch: [x64, arm64]
+    - target: portable
+      arch: [x64]
+  # Windows code signing (e.g. Azure Trusted Signing) is wired in CI, not here
+  # — see build plan §7.
+
+linux:
+  # Not a Phase 1 target platform, but electron-builder defaults to
+  # attempting a Linux build unless explicitly scoped out — kept minimal.
+  target:
+    - target: AppImage
+
+publish:
+  provider: github
+  # electron-updater reads this at runtime to check for new releases.

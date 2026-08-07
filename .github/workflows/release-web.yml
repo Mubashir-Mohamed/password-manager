@@ -1,0 +1,30 @@
+name: Release — Web
+
+on:
+  push:
+    tags: ["web-v*"]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @password-manager/web build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.PROD_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.PROD_SUPABASE_ANON_KEY }}
+      # Deploy target is a placeholder — wire to Vercel/Cloudflare Pages once
+      # a project exists there (build plan §7). Example (Cloudflare Pages):
+      # - uses: cloudflare/pages-action@v1
+      #   with:
+      #     apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      #     accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      #     projectName: password-manager
+      #     directory: apps/web/dist
+      - run: echo "TODO wire a real deploy target (Vercel/Cloudflare Pages) — see comment above"

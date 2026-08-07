@@ -1,0 +1,29 @@
+name: Release — Mobile
+
+on:
+  push:
+    tags: ["mobile-v*"]
+  workflow_dispatch:
+
+jobs:
+  eas-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      # EAS Build + Submit (build plan §7) — needs an Expo/EAS project linked
+      # (`eas init`) and Apple/Google store credentials configured via
+      # `eas credentials` before this actually ships anything.
+      - run: pnpm --filter @password-manager/mobile exec eas build --platform all --non-interactive
+      - run: pnpm --filter @password-manager/mobile exec eas submit --platform all --non-interactive
+        if: startsWith(github.ref, 'refs/tags/mobile-v')

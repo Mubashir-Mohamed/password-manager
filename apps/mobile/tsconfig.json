@@ -1,0 +1,14 @@
+{
+  "extends": "@password-manager/config/tsconfig/react-library.json",
+  "compilerOptions": {
+    "jsx": "react-native",
+    // "DOM" here is for typing only (react-native-get-random-values +
+    // core-domain's generator.ts expect `crypto.getRandomValues` to be typed
+    // per the Web Crypto API) — it doesn't pull in any actual browser APIs
+    // at runtime on RN/Hermes.
+    "lib": ["ES2022", "DOM"],
+    "noEmit": true,
+    "types": ["nativewind/types"]
+  },
+  "include": ["App.tsx", "src", "index.ts", "nativewind-env.d.ts"]
+}

@@ -1,0 +1,52 @@
+# Local development config for `supabase start` (Supabase CLI).
+# Cloud project settings (Phase 1 uses Supabase Cloud, not self-hosted — see
+# build plan §3) live in the Supabase dashboard, not this file.
+project_id = "password-manager"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+site_url = "http://localhost:5173"
+additional_redirect_urls = ["http://localhost:5173"]
+jwt_expiry = 3600
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+enable_confirmations = false # set true once real transactional email is wired up
+
+[realtime]
+enabled = true
+
+[storage]
+enabled = true
+file_size_limit = "20MiB"
+
+[edge_runtime]
+enabled = true
+
+[functions.get-kdf-params]
+verify_jwt = false # called before the user has a session — see function header comment
+
+[functions.hibp-check]
+verify_jwt = true
+
+[functions.lookup-public-key]
+verify_jwt = true
+
+[functions.emergency-access-cron-release]
+verify_jwt = false # invoked by the scheduler, not a logged-in user
