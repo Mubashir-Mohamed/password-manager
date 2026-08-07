@@ -226,3 +226,21 @@ the plan above:
   Edge Functions switched to exact `.eq()` matches. Verified live against
   Postgres — a spoofing attempt is now silently overwritten back to the
   attacker's own email.
+- **RLS policies were missing an explicit `TO authenticated`, and two
+  `SECURITY DEFINER` functions (`is_vault_owner`, `get_emergency_vault_key`)
+  were directly callable by `anon`.** Found by a `/supabase` skill audit
+  against its Supabase-specific security checklist. Neither was exploitable
+  as written — every policy already has an ownership predicate that
+  evaluates to NULL/false for `anon` (`auth.uid()` is NULL), and both
+  functions check `auth.uid()` internally — but both are exactly the
+  failure-prone patterns the checklist calls out, so both were closed as
+  defense-in-depth in `0004_restrict_policies_and_functions_to_authenticated.sql`.
+  The first attempt at the function fix (`revoke execute ... from public`)
+  turned out to be a no-op — verified live, `anon` could still call
+  `is_vault_owner` directly and get a real answer back — because Supabase's
+  project bootstrap grants EXECUTE to `anon` explicitly via
+  `alter default privileges`, not just implicitly through PUBLIC. Same root
+  cause as the `emergency_access` column-grant bug above (table/function
+  REVOKE against the generic "everyone" grant doesn't touch a grant made
+  directly to a specific role); the corrected version revokes from
+  `public, anon, authenticated` before re-granting to `authenticated` only.
