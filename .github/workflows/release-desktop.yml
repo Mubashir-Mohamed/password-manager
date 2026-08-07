@@ -1,0 +1,54 @@
+name: Release — Desktop
+
+on:
+  push:
+    tags: ["desktop-v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm --filter @password-manager/web build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.PROD_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.PROD_SUPABASE_ANON_KEY }}
+
+      - run: pnpm --filter @password-manager/desktop build:electron
+
+      # macOS signing + notarization (build plan §3/§7) — requires
+      # CSC_LINK/CSC_KEY_PASSWORD (Developer ID cert) and
+      # APPLE_ID/APPLE_APP_SPECIFIC_PASSWORD/APPLE_TEAM_ID secrets.
+      - name: Build + sign + notarize (macOS)
+        if: matrix.os == 'macos-latest'
+        run: pnpm --filter @password-manager/desktop exec electron-builder --mac
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      # Windows code signing (e.g. Azure Trusted Signing) — wire the actual
+      # signing step per whatever provider is chosen; placeholder here.
+      - name: Build + sign (Windows)
+        if: matrix.os == 'windows-latest'
+        run: pnpm --filter @password-manager/desktop exec electron-builder --win
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}
+          path: apps/desktop/release/**

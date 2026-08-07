@@ -1,0 +1,25 @@
+{
+  "name": "@password-manager/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"pnpm --filter @password-manager/web dev\" \"tsc -p tsconfig.electron.json --watch\" \"wait-on tcp:5173 dist-electron/main.js && electron .\"",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "build": "pnpm --filter @password-manager/web build && pnpm build:electron && electron-builder",
+    "typecheck": "tsc -p tsconfig.electron.json --noEmit",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@password-manager/config": "workspace:*",
+    "@types/node": "^22.10.5",
+    "concurrently": "^9.1.2",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.7.2",
+    "wait-on": "^8.0.1"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  }
+}

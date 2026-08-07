@@ -1,0 +1,12 @@
+{
+  "extends": "@password-manager/config/tsconfig/base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    // DOM lib is needed for the ambient `crypto.getRandomValues` typing used by
+    // the generator (Web Crypto API) — this package runs in browser/Electron/
+    // extension/Node(≥19) contexts, all of which expose that global.
+    "lib": ["ES2022", "DOM"]
+  },
+  "include": ["src"]
+}

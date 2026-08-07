@@ -1,0 +1,13 @@
+{
+  "extends": "@password-manager/config/tsconfig/base.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "outDir": "dist-electron",
+    "rootDir": "electron",
+    "types": ["node"]
+  },
+  "include": ["electron"]
+}

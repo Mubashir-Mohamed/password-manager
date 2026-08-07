@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "Password Manager",
+    "slug": "password-manager",
+    "scheme": "passwordmanager",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "bundleIdentifier": "com.yourorg.passwordmanager",
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "Unlock your vault instantly with Face ID."
+      }
+    },
+    "android": {
+      "package": "com.yourorg.passwordmanager",
+      "permissions": ["USE_BIOMETRIC", "USE_FINGERPRINT"]
+    },
+    "plugins": ["expo-local-authentication"]
+  }
+}

@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+env:
+  # Redirect turbo's remote-cache noise off unless/until a real token is
+  # configured as a repo secret (build plan §7).
+  TURBO_TELEMETRY_DISABLED: "1"
+
+jobs:
+  lint-typecheck-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Lint
+        run: pnpm turbo run lint
+
+      - name: Typecheck
+        run: pnpm turbo run typecheck
+
+      - name: Unit tests (core-crypto known-answer tests + core-domain)
+        run: pnpm turbo run test
+
+      - name: Build web
+        run: pnpm --filter @password-manager/web build
+
+      - name: Build browser extension
+        run: pnpm --filter @password-manager/browser-extension build
+
+  supabase-rls:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start local Supabase (applies migrations)
+        run: supabase start
+
+      - name: Run pgTAP RLS regression suite
+        run: supabase test db
+        # Blocking gate per build plan §7/§8 — every table must deny
+        # cross-user access. See supabase/tests/rls.test.sql; the scenarios it
+        # encodes were separately hand-verified against a live Postgres
+        # instance while the migration was written (see that file's header).
