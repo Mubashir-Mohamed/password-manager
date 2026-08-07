@@ -8,7 +8,14 @@
 -- The pgtap extension itself isn't available in this sandbox, but every
 -- scenario below was verified for real against a throwaway local Postgres 14
 -- instance (stubbed auth.users/auth.uid() + the real migrations) before this
--- file was written — including two genuine bugs the manual runs caught:
+-- file was written — including three genuine bugs the manual runs caught,
+-- all the same underlying Postgres gotcha in different spots: REVOKE against
+-- the "everyone" grant (table-level, or FROM PUBLIC) does not remove a grant
+-- made directly to a specific role, and Supabase's default project bootstrap
+-- makes such per-role grants routine (blanket table GRANTs to
+-- anon/authenticated, and default-privilege function EXECUTE grants to the
+-- same). Each fix had to revoke from the specific roles, not just the
+-- generic one, to actually close the gap:
 --   1. A naive column-level REVOKE on emergency_access was a silent no-op
 --      against Supabase's default blanket table-level GRANT, fixed in
 --      0001_init.sql (revoke table-level, re-grant an explicit column allowlist).
@@ -18,10 +25,17 @@
 --      security review, fixed in 0003_bind_profile_email_to_auth.sql (a
 --      trigger unconditionally overwrites profiles.email from auth.users on
 --      every insert/update, plus a case-insensitive unique index).
+--   3. A /supabase skill audit found every RLS policy was missing an
+--      explicit `TO authenticated` (defaulted to PUBLIC) and two SECURITY
+--      DEFINER functions were directly callable by anon. Fixed in
+--      0004_restrict_policies_and_functions_to_authenticated.sql — and the
+--      first attempt at that fix (`revoke ... from public`) was itself
+--      verified to be a no-op, since Supabase's bootstrap grants EXECUTE to
+--      `anon` explicitly, not just implicitly via PUBLIC.
 -- Still run this file through pgTAP before trusting it in CI — the scenarios
 -- are confirmed, the pgTAP wrapper syntax itself is not.
 begin;
-select plan(9);
+select plan(10);
 
 -- Two fake users, inserted directly (bypassing auth.users' normal signup flow
 -- — fine for a schema-level RLS test, since RLS only cares about auth.uid()).
@@ -128,6 +142,21 @@ select is(
   (select email from public.profiles where id = '22222222-2222-2222-2222-222222222222'),
   'bob@example.com',
   'Bob cannot spoof his profiles.email to Alice''s — the sync trigger overwrites it back to his real auth.users email'
+);
+
+-- Security regression (0004_restrict_policies_and_functions_to_authenticated.sql):
+-- the anon role must not be able to call the SECURITY DEFINER functions
+-- directly at all — not just get a false/empty answer back. A prior version
+-- of this migration only revoked EXECUTE from PUBLIC and left anon's
+-- explicit per-role grant (from Supabase's default-privileges bootstrap)
+-- intact; verified live against Postgres that the fix below actually blocks
+-- it (`revoke ... from public, anon, authenticated` before re-granting).
+set local role anon;
+select throws_ok(
+  $$ select public.is_vault_owner('a1a1a1a1-0000-0000-0000-000000000001') $$,
+  '42501',
+  null,
+  'anon cannot call is_vault_owner directly — EXECUTE was revoked from anon''s explicit grant, not just PUBLIC'
 );
 
 select * from finish();
