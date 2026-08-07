@@ -85,3 +85,34 @@ export async function deriveKeys(
 
   return { kek, authLoginSecret };
 }
+
+/** Single-purpose Argon2id KDF for the encrypted vault export/import feature
+ * (build plan §4/§5 "export (encrypted JSON)"). Deliberately independent of
+ * `deriveKeys`/the vault master password hierarchy — an export file has its
+ * own password, unrelated to the account's Secret Key, so there's no
+ * domain-separation step needed here: one password in, one key out. */
+export async function deriveExportKey(
+  exportPassword: string,
+  salt: Uint8Array,
+  params: KdfParams = KDF_PROFILES.moderate,
+): Promise<Uint8Array> {
+  const sodium = await getSodium();
+
+  if (salt.length !== sodium.crypto_pwhash_SALTBYTES) {
+    throw new Error(
+      `export salt must be ${sodium.crypto_pwhash_SALTBYTES} bytes, got ${salt.length}`,
+    );
+  }
+
+  const passwordBytes = sodium.from_string(exportPassword);
+  const key = sodium.crypto_pwhash(
+    32,
+    passwordBytes,
+    salt,
+    params.opslimit,
+    params.memlimit,
+    sodium.crypto_pwhash_ALG_ARGON2ID13,
+  );
+  sodium.memzero(passwordBytes);
+  return key;
+}

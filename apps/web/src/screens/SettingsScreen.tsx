@@ -25,6 +25,16 @@ export function SettingsScreen() {
         <span className="text-sm text-white/95">{profile?.email}</span>
       </Card>
 
+      {/* Grouped settings list — standard platform pattern per mobile design
+          plan §4.9 ("no need to reinvent this screen"). Plain container
+          (not Card, whose p-6 default isn't reliably overridable via a
+          trailing className with plain string-concat cn() — see that
+          module's TODO on tailwind-merge) so the divider rows sit flush. */}
+      <div className="flex flex-col divide-y divide-white/[0.06] overflow-hidden rounded-md border border-white/[0.08] bg-surface">
+        <SettingsRow label="Security" description="Weak, reused, and breached passwords" onClick={() => setScreen("security")} />
+        <SettingsRow label="Import & Export" description="CSV import, encrypted vault export" onClick={() => setScreen("import-export")} />
+      </div>
+
       <div className="flex flex-col gap-3">
         <Button variant="secondary" onClick={lock}>
           Lock now
@@ -39,5 +49,17 @@ export function SettingsScreen() {
         plan.
       </p>
     </div>
+  );
+}
+
+function SettingsRow({ label, description, onClick }: { label: string; description: string; onClick: () => void }) {
+  return (
+    <button onClick={onClick} className="flex items-center justify-between px-4 py-4 text-left hover:bg-white/[0.03]">
+      <div>
+        <p className="text-sm font-medium text-white/95">{label}</p>
+        <p className="text-xs text-white/60">{description}</p>
+      </div>
+      <span className="text-white/35">›</span>
+    </button>
   );
 }

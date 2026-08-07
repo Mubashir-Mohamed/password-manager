@@ -12,6 +12,8 @@ import { VaultHomeScreen } from "./screens/VaultHomeScreen.js";
 import { ItemDetailScreen } from "./screens/ItemDetailScreen.js";
 import { GeneratorScreen } from "./screens/GeneratorScreen.js";
 import { SettingsScreen } from "./screens/SettingsScreen.js";
+import { SecurityDashboardScreen } from "./screens/SecurityDashboardScreen.js";
+import { ImportExportScreen } from "./screens/ImportExportScreen.js";
 
 export function App() {
   const screen = useAppStore((s) => s.screen);
@@ -64,6 +66,8 @@ export function App() {
       {unlocked && screen === "item" && <ItemDetailScreen />}
       {unlocked && screen === "generator" && <GeneratorScreen />}
       {unlocked && screen === "settings" && <SettingsScreen />}
+      {unlocked && screen === "security" && <SecurityDashboardScreen />}
+      {unlocked && screen === "import-export" && <ImportExportScreen />}
 
       {unlocked && (screen === "vault" || screen === "generator" || screen === "settings") && (
         <nav className="fixed bottom-0 left-0 right-0 flex justify-center border-t border-white/[0.08] bg-chrome/95 backdrop-blur">

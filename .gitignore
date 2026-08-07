@@ -35,3 +35,11 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 .idea/
+
+# Claude Code local tooling — cached skill definitions and local-only
+# settings, not project source (per Claude Code convention, "local"
+# settings files stay untracked, same as .env.local).
+.claude/settings.local.json
+.claude/skills/
+.agents/
+skills-lock.json

@@ -38,3 +38,6 @@ export {
   findWeakPasswords,
 } from "./health.js";
 export type { StrengthResult, StrengthLabel, HealthCheckItem, ReusedPasswordGroup } from "./health.js";
+
+export { parseCsvLogins } from "./csvImport.js";
+export type { CsvImportResult } from "./csvImport.js";

@@ -4,6 +4,7 @@ import {
   boxForRecipient,
   currentTotpCode,
   decryptItem,
+  deriveExportKey,
   deriveKeys,
   encryptItem,
   fromBase64,
@@ -61,6 +62,30 @@ describe("deriveKeys — Argon2id + HKDF domain separation", () => {
 
   it("exposes both production KDF profiles with moderate stronger than interactive", () => {
     expect(KDF_PROFILES.moderate.memlimit).toBeGreaterThan(KDF_PROFILES.interactive.memlimit);
+  });
+});
+
+describe("deriveExportKey — encrypted vault export/import KDF", () => {
+  it("is deterministic for identical inputs", async () => {
+    const salt = await generateKdfSalt();
+    const a = await deriveExportKey("export password", salt, TEST_KDF_PARAMS);
+    const b = await deriveExportKey("export password", salt, TEST_KDF_PARAMS);
+    expect(await toBase64(a)).toEqual(await toBase64(b));
+  });
+
+  it("produces a different key for a different export password", async () => {
+    const salt = await generateKdfSalt();
+    const a = await deriveExportKey("password one", salt, TEST_KDF_PARAMS);
+    const b = await deriveExportKey("password two", salt, TEST_KDF_PARAMS);
+    expect(await toBase64(a)).not.toEqual(await toBase64(b));
+  });
+
+  it("is independent from deriveKeys — same password never collides with the vault KEK/authLoginSecret", async () => {
+    const salt = await generateKdfSalt();
+    const exportKey = await deriveExportKey("shared-secret", salt, TEST_KDF_PARAMS);
+    const { kek, authLoginSecret } = await deriveKeys("shared-secret", "", salt, TEST_KDF_PARAMS);
+    expect(await toBase64(exportKey)).not.toEqual(await toBase64(kek));
+    expect(await toBase64(exportKey)).not.toEqual(await toBase64(authLoginSecret));
   });
 });
 

@@ -12,6 +12,8 @@ export type Screen =
   | "vault"
   | "item"
   | "generator"
+  | "security"
+  | "import-export"
   | "settings";
 
 export interface DecryptedItem {
