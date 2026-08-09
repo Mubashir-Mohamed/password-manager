@@ -5,6 +5,27 @@ import { buildNewAccountMaterial, generateNewSecretKey } from "../lib/vaultCrypt
 import { supabase } from "../lib/supabase.js";
 import { useAppStore } from "../state/store.js";
 
+function downloadSecretKey(secretKey: string) {
+  const blob = new Blob([secretKey], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "password-manager-secret-key.txt";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function printSecretKey(secretKey: string) {
+  const win = window.open("", "_blank", "width=420,height=320");
+  if (!win) return; // popup blocked — Copy/Save to Files remain available
+  win.document.write(
+    `<title>Secret Key</title><pre style="font:20px ui-monospace,monospace;padding:32px;white-space:pre-wrap;">${secretKey}</pre>`,
+  );
+  win.document.close();
+  win.focus();
+  win.print();
+}
+
 // This screen is deliberately not skippable via back-swipe/navigation and
 // requires an explicit acknowledgment before continuing — see mobile design
 // plan §4.1: "treat it like a legal-document acknowledgment, not a casual
@@ -93,6 +114,24 @@ export function SignUpSecretKeyScreen() {
         >
           Copy to clipboard
         </Button>
+        <div className="flex gap-3">
+          <Button
+            variant="secondary"
+            className="flex-1"
+            onClick={() => secretKey && downloadSecretKey(secretKey)}
+            disabled={!secretKey}
+          >
+            Save to Files
+          </Button>
+          <Button
+            variant="secondary"
+            className="flex-1"
+            onClick={() => secretKey && printSecretKey(secretKey)}
+            disabled={!secretKey}
+          >
+            Print
+          </Button>
+        </div>
       </div>
 
       <label className="flex items-start gap-3 text-sm text-white/85">

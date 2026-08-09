@@ -5,6 +5,10 @@ import { decryptItemContent } from "../lib/vaultCrypto.js";
 import { supabase } from "../lib/supabase.js";
 import { useAppStore } from "../state/store.js";
 
+// Small custom glyph set for item types — design plan §2 Iconography reserves
+// custom icons specifically for concepts the OS icon set doesn't have.
+const TYPE_GLYPH: Record<string, string> = { login: "🔑", note: "📝", card: "💳", identity: "🪪" };
+
 /** Search pinned at top (never scrolls away), FAB for add — mobile design
  * plan §4.3 "Vault Home". Realtime subscription keeps this in sync across
  * devices/tabs (build plan §4). */
@@ -109,7 +113,9 @@ export function VaultHomeScreen() {
                     <p className="truncate text-xs text-white/60">{content.username}</p>
                   )}
                 </div>
-                <span className="text-xs uppercase tracking-wide text-white/35">{row.type}</span>
+                <span className="text-base" aria-label={row.type} title={row.type}>
+                  {TYPE_GLYPH[row.type] ?? "🔒"}
+                </span>
               </button>
             </li>
           ))}

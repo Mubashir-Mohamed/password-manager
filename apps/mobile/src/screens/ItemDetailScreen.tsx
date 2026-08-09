@@ -1,9 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, Pressable, Text, TextInput, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
+import * as Haptics from "expo-haptics";
+import Svg, { Circle } from "react-native-svg";
 import { currentTotpCode } from "@password-manager/core-crypto";
 import type { LoginContent } from "@password-manager/core-domain";
 import type { DecryptedItem } from "./VaultHomeScreen.js";
+import { Toast, type ToastTone } from "../components/Toast.js";
 
 export interface ItemDetailScreenProps {
   existing: DecryptedItem | null;
@@ -15,6 +18,38 @@ export interface ItemDetailScreenProps {
 
 const emptyLogin: LoginContent = { kind: "login", title: "", username: "", password: "", urls: [], notes: "" };
 
+/** Circular countdown ring + monospace code — mirrors packages/ui's
+ * `TOTPCode` (web) so the "peak moment" (mobile design plan §5) reads the
+ * same across surfaces: instant, like a boarding-pass QR code. */
+function TOTPRing({ code, remainingSeconds, period = 30 }: { code: string; remainingSeconds: number; period?: number }) {
+  const fraction = Math.max(0, Math.min(1, remainingSeconds / period));
+  const isLow = remainingSeconds <= 5;
+  const radius = 16;
+  const circumference = 2 * Math.PI * radius;
+
+  return (
+    <View className="mb-4 flex-row items-center justify-between rounded-xl border border-white/10 bg-surface px-4 py-3">
+      <Text className="font-mono text-2xl tracking-[0.2em] text-white">{code.replace(/(\d{3})(\d{3,4})/, "$1 $2")}</Text>
+      <Svg width={36} height={36} viewBox="0 0 36 36">
+        <Circle cx={18} cy={18} r={radius} fill="none" stroke="#ffffff1f" strokeWidth={3} />
+        <Circle
+          cx={18}
+          cy={18}
+          r={radius}
+          fill="none"
+          stroke={isLow ? "#F5A524" : "#6C5CE7"}
+          strokeWidth={3}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={circumference * (1 - fraction)}
+          rotation={-90}
+          origin="18, 18"
+        />
+      </Svg>
+    </View>
+  );
+}
+
 /** Add/edit a login item — mirrors apps/web's ItemDetailScreen (build plan §7
  * step 6 "Mobile core"). MVP scope covers the `login` item type end-to-end,
  * matching web; note/card/identity share the same encryptNewItem/
@@ -24,6 +59,9 @@ export function ItemDetailScreen({ existing, busy, onBack, onSave, onDelete }: I
     existing && existing.content.kind === "login" ? existing.content : emptyLogin,
   );
   const [now, setNow] = useState(Date.now());
+  const [revealed, setRevealed] = useState(false);
+  const [toast, setToast] = useState<{ message: string; tone: ToastTone } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!form.totp) return;
@@ -31,10 +69,21 @@ export function ItemDetailScreen({ existing, busy, onBack, onSave, onDelete }: I
     return () => clearInterval(id);
   }, [form.totp]);
 
+  useEffect(() => () => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+  }, []);
+
+  function showToast(message: string, tone: ToastTone = "default") {
+    setToast({ message, tone });
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 2200);
+  }
+
   async function copy(label: string, text: string) {
     await Clipboard.setStringAsync(text);
     setTimeout(() => Clipboard.setStringAsync("").catch(() => {}), 30_000);
-    Alert.alert(`${label} copied`, "Clears from clipboard in 30s.");
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    showToast(`${label} copied — clears in 30s`, "success");
   }
 
   function confirmDelete() {
@@ -73,16 +122,29 @@ export function ItemDetailScreen({ existing, busy, onBack, onSave, onDelete }: I
         className="mb-4 rounded-xl border border-white/10 bg-surface px-4 py-3 text-white"
       />
 
+      {/* Masked by default, monospace once revealed — mobile design plan
+          §4.4. A tappable "Show/Hide" label rather than a corner icon; the
+          whole-field-is-the-toggle pattern from packages/ui's read-only
+          PasswordField doesn't apply here since this field must stay
+          typeable (add/edit form, not a view-only screen). */}
       <Text className="mb-1 text-xs text-white/50">Password</Text>
       <View className="mb-4 flex-row items-center gap-2">
         <TextInput
           placeholder="Password"
           placeholderTextColor="#ffffff59"
           autoCapitalize="none"
+          secureTextEntry={!revealed}
           value={form.password}
           onChangeText={(password) => setForm({ ...form, password })}
-          className="flex-1 rounded-xl border border-white/10 bg-surface px-4 py-3 font-mono text-white"
+          className={`flex-1 rounded-xl border border-white/10 bg-surface px-4 py-3 text-white ${revealed ? "font-mono" : ""}`}
         />
+        <Pressable
+          onPress={() => setRevealed((r) => !r)}
+          accessibilityLabel={revealed ? "Password, visible. Tap to hide." : "Password, hidden. Tap to reveal."}
+          className="items-center justify-center rounded-xl border border-white/10 bg-surface px-4 py-3"
+        >
+          <Text className="text-xs font-semibold text-white/70">{revealed ? "Hide" : "Show"}</Text>
+        </Pressable>
         <Pressable
           onPress={() => form.password && copy("Password", form.password)}
           className="items-center justify-center rounded-xl border border-white/10 bg-surface px-4 py-3"
@@ -102,13 +164,20 @@ export function ItemDetailScreen({ existing, busy, onBack, onSave, onDelete }: I
         className="mb-4 rounded-xl border border-white/10 bg-surface px-4 py-3 text-white"
       />
 
+      <Text className="mb-1 text-xs text-white/50">Notes</Text>
+      <TextInput
+        placeholder="Optional"
+        placeholderTextColor="#ffffff59"
+        multiline
+        value={form.notes ?? ""}
+        onChangeText={(notes) => setForm({ ...form, notes })}
+        className="mb-4 min-h-[80px] rounded-xl border border-white/10 bg-surface px-4 py-3 text-white"
+        textAlignVertical="top"
+      />
+
       {totp && (
-        <Pressable
-          onPress={() => copy("Code", totp.code)}
-          className="mb-4 flex-row items-center justify-between rounded-xl border border-white/10 bg-surface px-4 py-3"
-        >
-          <Text className="font-mono text-lg tracking-widest text-white">{totp.code}</Text>
-          <Text className="text-xs text-white/50">{totp.remainingSeconds}s</Text>
+        <Pressable onPress={() => copy("Code", totp.code)}>
+          <TOTPRing code={totp.code} remainingSeconds={totp.remainingSeconds} period={form.totp?.period} />
         </Pressable>
       )}
 
@@ -126,6 +195,8 @@ export function ItemDetailScreen({ existing, busy, onBack, onSave, onDelete }: I
           </Pressable>
         )}
       </View>
+
+      {toast && <Toast message={toast.message} tone={toast.tone} />}
     </View>
   );
 }

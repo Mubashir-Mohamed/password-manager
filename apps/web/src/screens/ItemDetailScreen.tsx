@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, ConfirmSheet, TOTPCode, TextField } from "@password-manager/ui";
+import { Button, ConfirmSheet, PasswordField, TOTPCode, TextField } from "@password-manager/ui";
 import { currentTotpCode } from "@password-manager/core-crypto";
 import type { LoginContent } from "@password-manager/core-domain";
 import { createVaultItem, softDeleteVaultItem, updateVaultItem } from "@password-manager/api-client";
@@ -133,23 +133,22 @@ export function ItemDetailScreen() {
         value={form.username ?? ""}
         onChange={(e) => setForm({ ...form, username: e.target.value })}
       />
-      <div className="flex items-end gap-2">
-        <TextField
-          label="Password"
-          type="text"
-          className="flex-1 font-mono font-mono-nums"
-          value={form.password}
-          onChange={(e) => setForm({ ...form, password: e.target.value })}
-          hint="Paste one, or generate from the Generator tab."
-        />
-        <Button type="button" variant="secondary" onClick={() => form.password && copy(form.password)}>
-          Copy
-        </Button>
-      </div>
+      <PasswordField
+        label="Password"
+        value={form.password}
+        onChange={(password) => setForm({ ...form, password })}
+        placeholder="Paste one, or generate from the Generator tab."
+        onCopy={() => form.password && copy(form.password)}
+      />
       <TextField
         label="Website"
         value={form.urls[0] ?? ""}
         onChange={(e) => setForm({ ...form, urls: e.target.value ? [e.target.value] : [] })}
+      />
+      <TextField
+        label="Notes"
+        value={form.notes ?? ""}
+        onChange={(e) => setForm({ ...form, notes: e.target.value })}
       />
 
       {totp && <TOTPCode code={totp.code} remainingSeconds={totp.remainingSeconds} />}
