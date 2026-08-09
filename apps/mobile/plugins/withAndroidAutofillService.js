@@ -27,6 +27,7 @@ module.exports = function withAndroidAutofillService(config) {
   config = withCopiedSources(config);
   config = withManifestEntries(config);
   config = withKotlinVersionFix(config);
+  config = withPackageListFix(config);
   config = withGradleDependencies(config);
   config = withPackageRegistration(config);
   return config;
@@ -147,6 +148,54 @@ function withKotlinVersionFix(config) {
       return config;
     }
     config.modResults.contents = config.modResults.contents.replace(originalBlock, fixedBlock);
+    return config;
+  });
+}
+
+/**
+ * Second pre-existing, unrelated Expo SDK 52 template bug: the generated
+ * `generateAutolinkingPackageList` Gradle task (from @react-native/gradle-
+ * plugin, registered by ReactPlugin.kt) writes
+ * `app/build/generated/autolinking/.../PackageList.java` with
+ * `import expo.core.ExpoModulesPackage;` — a class that doesn't exist.
+ *
+ * Root cause, traced all the way down (not guessed): expo-modules-
+ * autolinking's `resolveDependencyConfigImplAndroidAsync` (reactNativeConfig/
+ * androidResolver.js) finds `ExpoModulesPackage.kt` via a glob that matches
+ * any `*Package.{java,kt}` file implementing `ReactPackage` — and because
+ * that match succeeds, it returns *before* the check that would otherwise
+ * skip Expo modules (`expo-module.config.json` presence). It then computes
+ * the import path from `expo/android/build.gradle`'s `namespace "expo.core"`
+ * — a stale value that doesn't match `ExpoModulesPackage.kt`'s actual
+ * `package expo.modules` declaration (which expo's own react-native.config.js
+ * correctly declares separately, but that declaration never gets used here
+ * because the glob match short-circuits first). A genuine upstream bug in
+ * the `expo` package, not this project.
+ *
+ * Rather than patch a hand-maintained copy of PackageList.java (config
+ * plugins only run at `expo prebuild` time, before this file exists — it's
+ * written by a Gradle task on every build), this hooks the actual Gradle
+ * task and fixes the file's text right after it's generated, before
+ * javac ever sees it.
+ */
+function withPackageListFix(config) {
+  return withAppBuildGradle(config, (config) => {
+    const marker = "withAndroidAutofillService PackageList fix";
+    if (config.modResults.contents.includes(marker)) return config;
+    config.modResults.contents += `
+// ${marker} — see plugins/withAndroidAutofillService.js for the full root cause.
+afterEvaluate {
+    tasks.matching { it.name == "generateAutolinkingPackageList" }.configureEach {
+        doLast {
+            def packageListFile = file("\${layout.buildDirectory.get()}/generated/autolinking/src/main/java/com/facebook/react/PackageList.java")
+            if (packageListFile.exists()) {
+                def fixed = packageListFile.text.replace("expo.core.ExpoModulesPackage", "expo.modules.ExpoModulesPackage")
+                packageListFile.text = fixed
+            }
+        }
+    }
+}
+`;
     return config;
   });
 }

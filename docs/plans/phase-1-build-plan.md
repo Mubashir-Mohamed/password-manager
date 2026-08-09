@@ -319,49 +319,84 @@ the plan above:
     `AutofillUnlockActivity`'s own `BiometricPrompt` call before it *reads*
     the cache — see `VaultKeystore.kt`'s header comment. Same posture as
     desktop's Electron `safeStorage` cache.
-  - **Verified — genuinely, not just "it compiles against a stub":**
+  - **Verified end-to-end on a real emulator, not just "it compiles":**
     `expo prebuild --platform android` generates the service/activity/
-    dependencies cleanly, and **`./gradlew :app:compileDebugKotlin` is
-    BUILD SUCCESSFUL from a clean prebuild** — every file in
-    `native/android/autofill/` (including the real
-    `androidx.biometric.BiometricPrompt` and Bouncy Castle usage) compiles
-    against the real Android SDK (platforms up to 35 were present) and the
-    real dependency graph. This is materially stronger verification than
-    the iOS side got (blocked entirely on a missing Xcode platform
-    component) — Android needed no missing SDK component, just a JDK
-    (17, present) and the Gradle wrapper (downloads itself).
-  - Two **pre-existing, unrelated** issues were hit and fixed/documented
+    dependencies cleanly; **`./gradlew :app:assembleDebug` is BUILD
+    SUCCESSFUL from a clean prebuild** (real APK, not just Kotlin
+    compilation); the APK **installed and launched on a booted Android
+    13 emulator** (Pixel 6 Pro API 34) without crashing; and
+    **`dumpsys autofill` confirmed the OS itself recognizes and selects
+    `PasswordManagerAutofillService`** (`Service Label: Vault Autofill`,
+    correct component, `Setup complete: true`) after setting it as the
+    active autofill service. This is a real OS-level integration check,
+    not a lint pass. What's *not* verified: the interactive
+    fill flow (BiometricPrompt → decrypt → pick → fill) — blocked by test-
+    harness friction unrelated to this code (Chrome delegates to its own
+    built-in password manager before third-party autofill services unless
+    reconfigured via `chrome://password-manager/settings`, which isn't
+    reachable via an external intent; the emulator's native fallback test
+    surface, WiFi's password field, has a selection-state-dependent
+    Settings spinner that resists coordinate-based automation; and
+    starting Metro to test through this app's own screens hit a fourth,
+    separate pre-existing pnpm/Metro module-resolution error, see below).
+  - Three **pre-existing, unrelated** issues were hit and fixed/documented
     along the way (present in this Expo SDK 52 / RN 0.76 template
     regardless of autofill):
-    1. `expo-modules-core` 2.2.3's Compose integration needs a Compose
-       Compiler version that requires Kotlin 1.9.25+, but the generated
-       `android/build.gradle`'s buildscript classpath resolves
-       `kotlin-gradle-plugin` to 1.9.24 (transitively, since it's declared
-       with no explicit version) — `compileDebugKotlin` failed for
-       `expo-modules-core` itself, before ever reaching this project's own
-       code. Fixed persistently via `withKotlinVersionFix` in the same
-       plugin (pins the classpath dependency + forces it repo-wide via
-       `resolutionStrategy`).
-    2. **Not fixed, only documented — full `:app:assembleDebug` is still
-       blocked by this:** the generated
+    1. **Fixed persistently** (`withKotlinVersionFix`): `expo-modules-core`
+       2.2.3's Compose integration needs a Compose Compiler version that
+       requires Kotlin 1.9.25+, but the generated `android/build.gradle`'s
+       buildscript classpath resolves `kotlin-gradle-plugin` to 1.9.24
+       (transitively, since it's declared with no explicit version) —
+       broke compiling `expo-modules-core` itself, before ever reaching
+       this project's own code. Pins the classpath dependency + forces it
+       repo-wide via `resolutionStrategy`.
+    2. **Fixed persistently** (`withPackageListFix`), and the root cause
+       fully traced this time: the generated
        `app/build/generated/autolinking/.../PackageList.java` (React
-       Native's own old-arch-interop autolinking, unrelated to Expo's
-       *own* `ExpoModulesPackageList` generator) emits
+       Native's own old-arch-interop autolinking, a *different* generator
+       from Expo's own `ExpoModulesPackageList`) was emitting
        `import expo.core.ExpoModulesPackage;` — a class that doesn't
-       exist. `expo`'s own `react-native.config.js` correctly declares
-       `packageImportPath: 'import expo.modules.ExpoModulesPackage;'`
-       (verified that class does exist), but the generator produces the
-       wrong one anyway, deterministically, even after deleting the
-       generated file and the Gradle daemon — confirmed **not** a stale-
-       cache issue, not something in this project's source, and not
-       triggered by anything in `native/android/` or the new plugin
-       (reproduced by inspecting the generated file directly). This is a
-       real bug somewhere in the RN 0.76 / Expo SDK 52 autolinking
-       resolution chain worth a proper upstream report; a hand-patch of
-       the generated file gets `:app:assembleDebug` building (confirming
-       the rest of the pipeline — resource merging, dexing, packaging — is
-       fine) but isn't a real fix since the file regenerates on every
-       build.
+       exist. Root cause: `expo-modules-autolinking`'s Android resolver
+       (`reactNativeConfig/androidResolver.js`) globs for any
+       `*Package.{java,kt}` file implementing `ReactPackage` and returns
+       as soon as it finds one — `ExpoModulesPackage.kt` matches, so the
+       resolver returns *before* reaching the check that would otherwise
+       skip Expo modules (`expo-module.config.json` presence), and it
+       then computes the import's package name from
+       `expo/android/build.gradle`'s `namespace "expo.core"` — a stale
+       value that doesn't match `ExpoModulesPackage.kt`'s real
+       `package expo.modules` declaration (which `expo`'s own
+       `react-native.config.js` correctly declares separately, but that
+       declaration is never reached because the glob match short-circuits
+       first). A genuine upstream bug in the `expo` package, not this
+       project or its dependency versions — worth an upstream report.
+       Since config plugins only run at `expo prebuild` time (before this
+       generated file exists — it's written by a Gradle task on every
+       build, not by prebuild), the fix hooks the actual
+       `generateAutolinkingPackageList` Gradle task and patches the
+       file's text right after it's written, on every build.
+    3. **Not fixed, only noted:** starting Metro (`npx expo start`) and
+       loading the app in-dev-server hit
+       `Unable to resolve module @babel/runtime/helpers/interopRequireDefault`
+       — a separate, well-known class of pnpm-monorepo/Metro
+       module-resolution mismatch (Metro's default resolver isn't fully
+       aware of pnpm's symlinked `node_modules` layout in some configs).
+       Affects the whole app's dev workflow, not just autofill — worth
+       its own follow-up (`@expo/metro-config` pnpm support / hoisting).
   - Not started: `onSaveRequest` (offering to save a *new* password from
     a form) — declines every request for now (`callback.onFailure(...)`),
     matching this pass's fill-only scope.
+  - **iOS, same session:** the missing Xcode platform component from the
+    iOS pass turned out to be a fast local install, not a multi-GB
+    download — `xcodebuild -downloadPlatform iOS` resolved in seconds
+    (bundled with Xcode, just not yet "installed"/registered with
+    CoreSimulator). With a fresh iOS 26.5 simulator, the **main app**
+    target builds and links successfully; the **credentials-provider
+    extension** target does not — `error: unable to resolve module
+    dependency: 'Clibsodium'` on `targets/credentials-provider/VaultCrypto.swift`,
+    confirming the exact FRAMEWORK_SEARCH_PATHS gap flagged as a risk in
+    the original iOS pass (CocoaPods isn't propagating the vendored
+    xcframework's search path to the `credentials-provider` target's
+    build settings) — a fixable bug in `plugins/withCredentialsProviderPod.js`'s
+    Podfile wiring, not attempted yet since the extension itself wasn't
+    the focus of this pass.
