@@ -10,14 +10,19 @@
     "ios": {
       "bundleIdentifier": "com.yourorg.passwordmanager",
       "supportsTablet": false,
+      "appleTeamId": "7V5C9QAL6Z",
       "infoPlist": {
         "NSFaceIDUsageDescription": "Unlock your vault instantly with Face ID."
+      },
+      "entitlements": {
+        "com.apple.security.application-groups": ["group.com.yourorg.passwordmanager.shared"],
+        "keychain-access-groups": ["$(AppIdentifierPrefix)com.yourorg.passwordmanager.shared"]
       }
     },
     "android": {
       "package": "com.yourorg.passwordmanager",
       "permissions": ["USE_BIOMETRIC", "USE_FINGERPRINT"]
     },
-    "plugins": ["expo-local-authentication"]
+    "plugins": ["expo-local-authentication", "@bacons/apple-targets", "./plugins/withCredentialsProviderPod.js"]
   }
 }

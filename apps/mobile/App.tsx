@@ -23,6 +23,7 @@ import {
   unlockSameDevice,
 } from "./src/lib/vaultCrypto.js";
 import { saveQuickUnlockSecret } from "./src/lib/biometrics.js";
+import { syncAutofillCache } from "./src/lib/autofillSync.js";
 import { supabase } from "./src/lib/supabase.js";
 import { UnlockScreen } from "./src/screens/UnlockScreen.js";
 import { VaultHomeScreen, type DecryptedItem } from "./src/screens/VaultHomeScreen.js";
@@ -99,6 +100,14 @@ export default function App() {
       cleanup?.();
     };
   }, [vmk, session]);
+
+  // Keep the iOS Credential Provider Extension's local ciphertext cache
+  // current (build plan §7 step 7) — every time the item list changes,
+  // whether from this session's own edits or a Realtime update from
+  // another device. No-op on Android (see autofillSync.ts).
+  useEffect(() => {
+    syncAutofillCache(items.map((i) => i.row));
+  }, [items]);
 
   async function handleUnlock({
     email,

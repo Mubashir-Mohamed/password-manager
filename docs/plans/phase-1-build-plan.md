@@ -244,3 +244,50 @@ the plan above:
   REVOKE against the generic "everyone" grant doesn't touch a grant made
   directly to a specific role); the corrected version revokes from
   `public, anon, authenticated` before re-granting to `authenticated` only.
+- **§7 step 7 (iOS native autofill), first pass:** the Credential Provider
+  Extension is scaffolded (`apps/mobile/targets/credentials-provider/`) via
+  `@bacons/apple-targets`, with a Swift decrypt-only crypto port
+  (`VaultCrypto.swift`, linking the *same* `Clibsodium.xcframework` binary
+  react-native-libsodium already vendors — not a reimplementation), a shared
+  Keychain Access Group for the biometric-gated VMK cache, and a shared
+  App Group `UserDefaults` suite (via `react-native-shared-group-preferences`)
+  for the ciphertext item cache the extension reads. The extension
+  deliberately does **not** derive the KDF itself or hold a live IPC
+  connection to the main app — same "OS-level cache, not a live relay"
+  pattern as the desktop Quick Access overlay's quick-unlock cache.
+  - `@bacons/apple-targets` needs **CocoaPods 1.16.2+** (specifically an
+    `xcodeproj` gem new enough to parse Xcode 16's `PBXFileSystemSynchronizedRootGroup`
+    ISA) — this environment's system CocoaPods was 1.14.3 and choked with an
+    opaque `xcodeproj` parse error; fixed with `gem install cocoapods
+    --user-install` (1.17.0). Also needs `LANG=en_US.UTF-8`/`LC_ALL=en_US.UTF-8`
+    set — CocoaPods 1.14.3 crashed outright without it (unrelated Ruby
+    `unicode_normalize` bug), newer CocoaPods is more tolerant but it's
+    worth keeping set.
+  - `@bacons/apple-targets` picks up a `pods.rb` file inside a target
+    directory automatically, evaluated inside a Podfile `target` block
+    whose name is the **target directory's basename**, not the `name:`
+    field in `expo-target.config.js` — those two must match exactly or
+    `pod install` fails with "Unable to find a target named X". Used this
+    to vendor `Clibsodium.xcframework` into the extension via a small
+    generated local podspec (`plugins/withCredentialsProviderPod.js`,
+    regenerated every `expo prebuild` since the xcframework's path depends
+    on the current machine's node_modules resolution) referenced with
+    `:path` (development-pod mode), not `:podspec =>` — the latter makes
+    CocoaPods try to actually fetch `s.source`, which doesn't apply to an
+    already-local vendored binary.
+  - **Verified:** TS typecheck/lint/tests pass; `expo prebuild` generates
+    the extension target cleanly; `pod install` succeeds (81 pods,
+    including the custom `ClibsodiumXCFramework` linkage). **Not verified:**
+    actual Swift compilation. This sandbox's Xcode 26.6 has no iOS platform
+    component installed (only an old iOS 17.2 Simulator runtime left over
+    from a prior install, which this Xcode version doesn't recognize as a
+    valid destination) — every `xcodebuild build` destination (simulator,
+    generic device) fails with "iOS 26.5 is not installed," and downloading
+    that platform component is a multi-GB operation not attempted here.
+    Swift syntax errors, API misuse, or entitlement/provisioning issues in
+    `targets/credentials-provider/*.swift` are consequently **unconfirmed**
+    — the next session with a fully-provisioned Xcode should run
+    `xcodebuild build` (or just open the workspace and build from Xcode
+    directly) before trusting this beyond "the surrounding plumbing works."
+  - Android `AutofillService` is a separate, not-yet-started effort —
+    `autofillSync.ts` already no-ops on Android in anticipation.
