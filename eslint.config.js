@@ -4,9 +4,18 @@
 // packages/config/eslint-preset.js) resolves here without needing its own
 // copy.
 import base from "./packages/config/eslint-preset.js";
+import globals from "globals";
 
 export default [
   ...base,
+  {
+    // Expo config plugins (apps/mobile/plugins/**) run under plain Node at
+    // `expo prebuild` time, same as the *.config.js files the shared preset
+    // already covers — see packages/config/eslint-preset.js's comment.
+    files: ["apps/mobile/plugins/**/*.js"],
+    languageOptions: { globals: globals.node, sourceType: "commonjs" },
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
   {
     ignores: [
       "**/dist/**",

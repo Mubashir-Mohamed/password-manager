@@ -244,3 +244,159 @@ the plan above:
   REVOKE against the generic "everyone" grant doesn't touch a grant made
   directly to a specific role); the corrected version revokes from
   `public, anon, authenticated` before re-granting to `authenticated` only.
+- **§7 step 7 (iOS native autofill), first pass:** the Credential Provider
+  Extension is scaffolded (`apps/mobile/targets/credentials-provider/`) via
+  `@bacons/apple-targets`, with a Swift decrypt-only crypto port
+  (`VaultCrypto.swift`, linking the *same* `Clibsodium.xcframework` binary
+  react-native-libsodium already vendors — not a reimplementation), a shared
+  Keychain Access Group for the biometric-gated VMK cache, and a shared
+  App Group `UserDefaults` suite (via `react-native-shared-group-preferences`)
+  for the ciphertext item cache the extension reads. The extension
+  deliberately does **not** derive the KDF itself or hold a live IPC
+  connection to the main app — same "OS-level cache, not a live relay"
+  pattern as the desktop Quick Access overlay's quick-unlock cache.
+  - `@bacons/apple-targets` needs **CocoaPods 1.16.2+** (specifically an
+    `xcodeproj` gem new enough to parse Xcode 16's `PBXFileSystemSynchronizedRootGroup`
+    ISA) — this environment's system CocoaPods was 1.14.3 and choked with an
+    opaque `xcodeproj` parse error; fixed with `gem install cocoapods
+    --user-install` (1.17.0). Also needs `LANG=en_US.UTF-8`/`LC_ALL=en_US.UTF-8`
+    set — CocoaPods 1.14.3 crashed outright without it (unrelated Ruby
+    `unicode_normalize` bug), newer CocoaPods is more tolerant but it's
+    worth keeping set.
+  - `@bacons/apple-targets` picks up a `pods.rb` file inside a target
+    directory automatically, evaluated inside a Podfile `target` block
+    whose name is the **target directory's basename**, not the `name:`
+    field in `expo-target.config.js` — those two must match exactly or
+    `pod install` fails with "Unable to find a target named X". Used this
+    to vendor `Clibsodium.xcframework` into the extension via a small
+    generated local podspec (`plugins/withCredentialsProviderPod.js`,
+    regenerated every `expo prebuild` since the xcframework's path depends
+    on the current machine's node_modules resolution) referenced with
+    `:path` (development-pod mode), not `:podspec =>` — the latter makes
+    CocoaPods try to actually fetch `s.source`, which doesn't apply to an
+    already-local vendored binary.
+  - **Verified:** TS typecheck/lint/tests pass; `expo prebuild` generates
+    the extension target cleanly; `pod install` succeeds (81 pods,
+    including the custom `ClibsodiumXCFramework` linkage). **Not verified:**
+    actual Swift compilation. This sandbox's Xcode 26.6 has no iOS platform
+    component installed (only an old iOS 17.2 Simulator runtime left over
+    from a prior install, which this Xcode version doesn't recognize as a
+    valid destination) — every `xcodebuild build` destination (simulator,
+    generic device) fails with "iOS 26.5 is not installed," and downloading
+    that platform component is a multi-GB operation not attempted here.
+    Swift syntax errors, API misuse, or entitlement/provisioning issues in
+    `targets/credentials-provider/*.swift` are consequently **unconfirmed**
+    — the next session with a fully-provisioned Xcode should run
+    `xcodebuild build` (or just open the workspace and build from Xcode
+    directly) before trusting this beyond "the surrounding plumbing works."
+  - Android `AutofillService` is a separate, not-yet-started effort —
+    `autofillSync.ts` already no-ops on Android in anticipation.
+- **§7 step 7 (Android native autofill), first pass:** `native/android/autofill/`
+  (Kotlin, registered into the generated project by
+  `plugins/withAndroidAutofillService.js`) — `PasswordManagerAutofillService`
+  (`AutofillService`) + `AutofillUnlockActivity` (the biometric-gated picker
+  UI, Android's standard `Dataset.Builder#setAuthentication` pattern) + a
+  decrypt-only crypto port + a Keystore-backed VMK cache + a plain
+  SharedPreferences ciphertext cache (no App Group equivalent needed — same
+  app process, unlike iOS).
+  - **No NDK needed, unlike iOS.** Android has no libsodium `.so` bound to
+    anything callable from arbitrary Kotlin (react-native-libsodium's own
+    JNI bridge only installs a JSI binding for JS, not a Java/Kotlin API),
+    and this sandbox has no NDK installed to build a custom JNI shim against
+    the vendored `.so` anyway. Used Bouncy Castle's `XChaCha20Poly1305`
+    (`org.bouncycastle.crypto.modes.XChaCha20Poly1305`, needs
+    bcprov-jdk18on **>= ~1.80** — 1.79 doesn't have the class yet) instead —
+    pure JVM, no native compilation. **Cross-checked, not assumed:** a real
+    ciphertext produced by core-crypto's actual `encryptItem` (WASM
+    libsodium) was decrypted with Bouncy Castle 1.85.2 using the identical
+    key/nonce/aad and recovered byte-identical plaintext (ad hoc script, not
+    committed — reproducible via `packages/core-crypto`'s exports + a
+    `bcprov-jdk18on` jar from Maven Central).
+  - VMK cache is Android Keystore-encrypted (AES-256-GCM, hardware-backed)
+    but deliberately **not** `setUserAuthenticationRequired(true)` on the
+    key itself — that would force a second biometric prompt on the main app
+    immediately after every unlock. The biometric gate that matters is
+    `AutofillUnlockActivity`'s own `BiometricPrompt` call before it *reads*
+    the cache — see `VaultKeystore.kt`'s header comment. Same posture as
+    desktop's Electron `safeStorage` cache.
+  - **Verified end-to-end on a real emulator, not just "it compiles":**
+    `expo prebuild --platform android` generates the service/activity/
+    dependencies cleanly; **`./gradlew :app:assembleDebug` is BUILD
+    SUCCESSFUL from a clean prebuild** (real APK, not just Kotlin
+    compilation); the APK **installed and launched on a booted Android
+    13 emulator** (Pixel 6 Pro API 34) without crashing; and
+    **`dumpsys autofill` confirmed the OS itself recognizes and selects
+    `PasswordManagerAutofillService`** (`Service Label: Vault Autofill`,
+    correct component, `Setup complete: true`) after setting it as the
+    active autofill service. This is a real OS-level integration check,
+    not a lint pass. What's *not* verified: the interactive
+    fill flow (BiometricPrompt → decrypt → pick → fill) — blocked by test-
+    harness friction unrelated to this code (Chrome delegates to its own
+    built-in password manager before third-party autofill services unless
+    reconfigured via `chrome://password-manager/settings`, which isn't
+    reachable via an external intent; the emulator's native fallback test
+    surface, WiFi's password field, has a selection-state-dependent
+    Settings spinner that resists coordinate-based automation; and
+    starting Metro to test through this app's own screens hit a fourth,
+    separate pre-existing pnpm/Metro module-resolution error, see below).
+  - Three **pre-existing, unrelated** issues were hit and fixed/documented
+    along the way (present in this Expo SDK 52 / RN 0.76 template
+    regardless of autofill):
+    1. **Fixed persistently** (`withKotlinVersionFix`): `expo-modules-core`
+       2.2.3's Compose integration needs a Compose Compiler version that
+       requires Kotlin 1.9.25+, but the generated `android/build.gradle`'s
+       buildscript classpath resolves `kotlin-gradle-plugin` to 1.9.24
+       (transitively, since it's declared with no explicit version) —
+       broke compiling `expo-modules-core` itself, before ever reaching
+       this project's own code. Pins the classpath dependency + forces it
+       repo-wide via `resolutionStrategy`.
+    2. **Fixed persistently** (`withPackageListFix`), and the root cause
+       fully traced this time: the generated
+       `app/build/generated/autolinking/.../PackageList.java` (React
+       Native's own old-arch-interop autolinking, a *different* generator
+       from Expo's own `ExpoModulesPackageList`) was emitting
+       `import expo.core.ExpoModulesPackage;` — a class that doesn't
+       exist. Root cause: `expo-modules-autolinking`'s Android resolver
+       (`reactNativeConfig/androidResolver.js`) globs for any
+       `*Package.{java,kt}` file implementing `ReactPackage` and returns
+       as soon as it finds one — `ExpoModulesPackage.kt` matches, so the
+       resolver returns *before* reaching the check that would otherwise
+       skip Expo modules (`expo-module.config.json` presence), and it
+       then computes the import's package name from
+       `expo/android/build.gradle`'s `namespace "expo.core"` — a stale
+       value that doesn't match `ExpoModulesPackage.kt`'s real
+       `package expo.modules` declaration (which `expo`'s own
+       `react-native.config.js` correctly declares separately, but that
+       declaration is never reached because the glob match short-circuits
+       first). A genuine upstream bug in the `expo` package, not this
+       project or its dependency versions — worth an upstream report.
+       Since config plugins only run at `expo prebuild` time (before this
+       generated file exists — it's written by a Gradle task on every
+       build, not by prebuild), the fix hooks the actual
+       `generateAutolinkingPackageList` Gradle task and patches the
+       file's text right after it's written, on every build.
+    3. **Not fixed, only noted:** starting Metro (`npx expo start`) and
+       loading the app in-dev-server hit
+       `Unable to resolve module @babel/runtime/helpers/interopRequireDefault`
+       — a separate, well-known class of pnpm-monorepo/Metro
+       module-resolution mismatch (Metro's default resolver isn't fully
+       aware of pnpm's symlinked `node_modules` layout in some configs).
+       Affects the whole app's dev workflow, not just autofill — worth
+       its own follow-up (`@expo/metro-config` pnpm support / hoisting).
+  - Not started: `onSaveRequest` (offering to save a *new* password from
+    a form) — declines every request for now (`callback.onFailure(...)`),
+    matching this pass's fill-only scope.
+  - **iOS, same session:** the missing Xcode platform component from the
+    iOS pass turned out to be a fast local install, not a multi-GB
+    download — `xcodebuild -downloadPlatform iOS` resolved in seconds
+    (bundled with Xcode, just not yet "installed"/registered with
+    CoreSimulator). With a fresh iOS 26.5 simulator, the **main app**
+    target builds and links successfully; the **credentials-provider
+    extension** target does not — `error: unable to resolve module
+    dependency: 'Clibsodium'` on `targets/credentials-provider/VaultCrypto.swift`,
+    confirming the exact FRAMEWORK_SEARCH_PATHS gap flagged as a risk in
+    the original iOS pass (CocoaPods isn't propagating the vendored
+    xcframework's search path to the `credentials-provider` target's
+    build settings) — a fixable bug in `plugins/withCredentialsProviderPod.js`'s
+    Podfile wiring, not attempted yet since the extension itself wasn't
+    the focus of this pass.
