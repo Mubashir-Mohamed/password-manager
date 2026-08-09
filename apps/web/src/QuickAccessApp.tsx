@@ -4,8 +4,15 @@ import { fromBase64, toBase64 } from "@password-manager/core-crypto";
 import type { LoginContent } from "@password-manager/core-domain";
 import { useAppStore } from "./state/store.js";
 import { useVaultSync } from "./lib/useVaultSync.js";
+import { useAutoLock } from "./lib/useAutoLock.js";
 import { unlockWithCredentials } from "./lib/vaultCrypto.js";
-import { getQuickUnlock, hideQuickAccess, resizeQuickAccess, saveQuickUnlock } from "./lib/desktopBridge.js";
+import {
+  getQuickUnlock,
+  hideQuickAccess,
+  onLockRequested,
+  resizeQuickAccess,
+  saveQuickUnlock,
+} from "./lib/desktopBridge.js";
 import { supabase } from "./lib/supabase.js";
 
 interface QuickUnlockPayload {
@@ -34,12 +41,20 @@ const MAX_VISIBLE_ROWS = 6;
  * window has signed in at least once on this machine. */
 export function QuickAccessApp() {
   useVaultSync();
+  useAutoLock(); // this renderer has its own store/lock state — see header comment
   const vmk = useAppStore((s) => s.vmk);
   const items = useAppStore((s) => s.items);
   const profile = useAppStore((s) => s.profile);
   const setSession = useAppStore((s) => s.setSession);
   const setProfile = useAppStore((s) => s.setProfile);
   const setUnlocked = useAppStore((s) => s.setUnlocked);
+
+  // The overlay window is hidden, not destroyed, between uses — without
+  // this it would keep the vault unlocked (VMK + decrypted items in this
+  // renderer's memory) indefinitely after the main window locks, since the
+  // main process broadcasts "app:lock-requested" to both windows but this
+  // one was never listening. Security-relevant: don't drop this.
+  useEffect(() => onLockRequested(() => useAppStore.getState().lock()), []);
 
   const [bootstrapping, setBootstrapping] = useState(true);
   const [hasSession, setHasSession] = useState(false);

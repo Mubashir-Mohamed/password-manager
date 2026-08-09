@@ -18,10 +18,11 @@ function downloadSecretKey(secretKey: string) {
 function printSecretKey(secretKey: string) {
   const win = window.open("", "_blank", "width=420,height=320");
   if (!win) return; // popup blocked — Copy/Save to Files remain available
-  win.document.write(
-    `<title>Secret Key</title><pre style="font:20px ui-monospace,monospace;padding:32px;white-space:pre-wrap;">${secretKey}</pre>`,
-  );
-  win.document.close();
+  win.document.title = "Secret Key";
+  const pre = win.document.createElement("pre");
+  pre.style.cssText = "font:20px ui-monospace,monospace;padding:32px;white-space:pre-wrap;";
+  pre.textContent = secretKey; // not innerHTML/document.write — no interpolation into markup
+  win.document.body.appendChild(pre);
   win.focus();
   win.print();
 }
