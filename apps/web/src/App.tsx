@@ -4,12 +4,16 @@ import { fetchOwnProfile, onAuthStateChange } from "@password-manager/api-client
 import { supabase } from "./lib/supabase.js";
 import { useAppStore } from "./state/store.js";
 import { useAutoLock } from "./lib/useAutoLock.js";
+import { useVaultSync } from "./lib/useVaultSync.js";
+import { useIsDesktopWidth } from "./lib/useIsDesktopWidth.js";
+import { onLockRequested } from "./lib/desktopBridge.js";
 import { WelcomeScreen } from "./screens/WelcomeScreen.js";
 import { SignUpCredentialsScreen } from "./screens/SignUpCredentialsScreen.js";
 import { SignUpSecretKeyScreen } from "./screens/SignUpSecretKeyScreen.js";
 import { UnlockScreen } from "./screens/UnlockScreen.js";
 import { VaultHomeScreen } from "./screens/VaultHomeScreen.js";
 import { ItemDetailScreen } from "./screens/ItemDetailScreen.js";
+import { DesktopVaultShell } from "./screens/DesktopVaultShell.js";
 import { GeneratorScreen } from "./screens/GeneratorScreen.js";
 import { SettingsScreen } from "./screens/SettingsScreen.js";
 import { SecurityDashboardScreen } from "./screens/SecurityDashboardScreen.js";
@@ -26,6 +30,11 @@ export function App() {
   const clearToast = useAppStore((s) => s.clearToast);
 
   useAutoLock();
+  useVaultSync();
+  const isDesktopWidth = useIsDesktopWidth();
+
+  // Tray "Lock now" (desktop only — no-op elsewhere, see lib/desktopBridge.ts).
+  useEffect(() => onLockRequested(() => useAppStore.getState().lock()), []);
 
   // Bootstrap: restore whatever Supabase session persisted (e.g. page
   // reload) and route to Unlock rather than all the way back to Welcome —
@@ -63,8 +72,9 @@ export function App() {
       {screen === "signup-credentials" && <SignUpCredentialsScreen />}
       {screen === "signup-secretkey" && <SignUpSecretKeyScreen />}
       {screen === "unlock" && <UnlockScreen />}
-      {unlocked && screen === "vault" && <VaultHomeScreen />}
-      {unlocked && screen === "item" && <ItemDetailScreen />}
+      {unlocked && (screen === "vault" || screen === "item") && isDesktopWidth && <DesktopVaultShell />}
+      {unlocked && screen === "vault" && !isDesktopWidth && <VaultHomeScreen />}
+      {unlocked && screen === "item" && !isDesktopWidth && <ItemDetailScreen />}
       {unlocked && screen === "generator" && <GeneratorScreen />}
       {unlocked && screen === "settings" && <SettingsScreen />}
       {unlocked && screen === "security" && <SecurityDashboardScreen />}

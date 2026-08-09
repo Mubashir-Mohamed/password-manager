@@ -15,6 +15,10 @@ export interface VaultHomeScreenProps {
   onAddItem: () => void;
 }
 
+// Small custom glyph set for item types — design plan §2 Iconography reserves
+// custom icons specifically for concepts the OS icon set doesn't have.
+const TYPE_GLYPH: Record<string, string> = { login: "🔑", note: "📝", card: "💳", identity: "🪪" };
+
 /** Search pinned at top (never scrolls away), favicon-style initial circle +
  * title/username row, FAB for add — mobile design plan §4.3. */
 export function VaultHomeScreen({ items, loading, onSelectItem, onAddItem }: VaultHomeScreenProps) {
@@ -75,6 +79,7 @@ export function VaultHomeScreen({ items, loading, onSelectItem, onAddItem }: Vau
                   </Text>
                 )}
               </View>
+              <Text className="text-base">{TYPE_GLYPH[item.row.type] ?? "🔒"}</Text>
             </Pressable>
           )}
         />

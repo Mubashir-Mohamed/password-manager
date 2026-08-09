@@ -42,11 +42,14 @@ export function createMainWindow(): BrowserWindow {
  * modal inside the main window — which is what lets it float over other
  * applications when summoned by the global shortcut.
  *
- * NOTE: `apps/web`'s renderer doesn't yet branch on a "quick access mode" —
- * it currently always renders the full app shell. Wiring a dedicated compact
- * search UI behind a `?quickAccess=1` query flag (this window passes one
- * already) is a fast-follow; this window/IPC scaffolding is real and tested,
- * the renderer-side overlay UI itself is not yet built. */
+ * `apps/web`'s `main.tsx` branches on the `?quickAccess=1` query param this
+ * window passes and renders `QuickAccessApp` instead of the full app shell —
+ * a genuinely separate renderer process/JS heap from the main window, which
+ * bootstraps its own session/unlock state (shared Supabase session +
+ * OS-level quick-unlock cache, not a live IPC relay of the main window's
+ * in-memory VMK). See QuickAccessApp.tsx's header comment for the full
+ * story. Unverified against an actual OS window — no display in the
+ * sandbox this shipped from. */
 export function createQuickAccessWindow(): BrowserWindow {
   const display = screen.getPrimaryDisplay();
   const width = 560;

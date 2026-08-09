@@ -41,6 +41,19 @@ function registerIpcHandlers() {
 
   ipcMain.on("app:locked", () => setTrayLockState("locked"));
   ipcMain.on("app:unlocked", () => setTrayLockState("unlocked"));
+
+  // The overlay renderer can't call BrowserWindow methods directly
+  // (contextIsolation) — it asks the main process to hide it (Escape,
+  // losing focus after an action) or grow/shrink to fit its current
+  // content (search bar alone vs. search + result rows).
+  ipcMain.on("quick-access:hide", () => {
+    quickAccessWindow?.hide();
+  });
+  ipcMain.on("quick-access:resize", (_e, height: number) => {
+    if (!quickAccessWindow || quickAccessWindow.isDestroyed()) return;
+    const width = quickAccessWindow.getSize()[0] ?? 560;
+    quickAccessWindow.setSize(width, Math.max(72, Math.round(height)));
+  });
 }
 
 function setupAutoUpdater() {

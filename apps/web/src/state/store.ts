@@ -3,6 +3,7 @@ import type { Session } from "@supabase/supabase-js";
 import type { Database } from "@password-manager/api-client";
 import type { VaultItemContent } from "@password-manager/core-domain";
 import type { Keypair } from "@password-manager/core-crypto";
+import { notifyLocked, notifyUnlocked } from "../lib/desktopBridge.js";
 
 export type Screen =
   | "welcome"
@@ -39,6 +40,7 @@ interface AppState {
 
   vaultId: string | null;
   items: DecryptedItem[];
+  itemsLoading: boolean;
   activeItemId: string | null;
 
   pendingSecretKey: string | null; // transient — only alive during the signup reveal step
@@ -50,6 +52,7 @@ interface AppState {
   setUnlocked: (vmk: Uint8Array, keypair: Keypair) => void;
   setVaultId: (id: string) => void;
   setItems: (items: DecryptedItem[]) => void;
+  setItemsLoading: (loading: boolean) => void;
   upsertItem: (item: DecryptedItem) => void;
   removeItem: (itemId: string) => void;
   setActiveItemId: (id: string | null) => void;
@@ -70,6 +73,7 @@ export const useAppStore = create<AppState>((set) => ({
   keypair: null,
   vaultId: null,
   items: [],
+  itemsLoading: false,
   activeItemId: null,
   pendingSecretKey: null,
   toast: null,
@@ -77,9 +81,13 @@ export const useAppStore = create<AppState>((set) => ({
   setScreen: (screen) => set({ screen }),
   setSession: (session) => set({ session }),
   setProfile: (profile) => set({ profile }),
-  setUnlocked: (vmk, keypair) => set({ vmk, keypair }),
+  setUnlocked: (vmk, keypair) => {
+    notifyUnlocked(); // no-op off Electron — see lib/desktopBridge.ts
+    set({ vmk, keypair });
+  },
   setVaultId: (vaultId) => set({ vaultId }),
   setItems: (items) => set({ items }),
+  setItemsLoading: (itemsLoading) => set({ itemsLoading }),
   upsertItem: (item) =>
     set((state) => ({
       items: [item, ...state.items.filter((existing) => existing.row.id !== item.row.id)],
@@ -90,12 +98,14 @@ export const useAppStore = create<AppState>((set) => ({
   setPendingSecretKey: (pendingSecretKey) => set({ pendingSecretKey }),
   showToast: (toast) => set({ toast }),
   clearToast: () => set({ toast: null }),
-  lock: () =>
+  lock: () => {
+    notifyLocked(); // no-op off Electron — see lib/desktopBridge.ts
     set({
       vmk: null,
       keypair: null,
       items: [],
       activeItemId: null,
       screen: "unlock",
-    }),
+    });
+  },
 }));

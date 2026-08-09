@@ -1,57 +1,24 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Button, EmptyState, TextField } from "@password-manager/ui";
-import { listVaultItems, subscribeToVaultItems } from "@password-manager/api-client";
-import { decryptItemContent } from "../lib/vaultCrypto.js";
-import { supabase } from "../lib/supabase.js";
 import { useAppStore } from "../state/store.js";
 
+// Small custom glyph set for item types — design plan §2 Iconography reserves
+// custom icons specifically for concepts the OS icon set doesn't have.
+export const TYPE_GLYPH: Record<string, string> = { login: "🔑", note: "📝", card: "💳", identity: "🪪" };
+
 /** Search pinned at top (never scrolls away), FAB for add — mobile design
- * plan §4.3 "Vault Home". Realtime subscription keeps this in sync across
- * devices/tabs (build plan §4). */
+ * plan §4.3 "Vault Home". This is the narrow-viewport rendering; at desktop
+ * widths App.tsx renders DesktopVaultShell instead (desktop design plan
+ * §4.1's three-pane layout). Item loading + Realtime sync live in
+ * useVaultSync, called once near the app root so both layouts share one
+ * subscription. */
 export function VaultHomeScreen() {
-  const vaultId = useAppStore((s) => s.vaultId);
-  const vmk = useAppStore((s) => s.vmk);
   const items = useAppStore((s) => s.items);
-  const setItems = useAppStore((s) => s.setItems);
+  const loading = useAppStore((s) => s.itemsLoading);
   const setActiveItemId = useAppStore((s) => s.setActiveItemId);
   const setScreen = useAppStore((s) => s.setScreen);
 
   const [query, setQuery] = useState("");
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!vaultId || !vmk) return;
-    let cancelled = false;
-
-    async function load() {
-      setLoading(true);
-      const rows = await listVaultItems(supabase, vaultId!);
-      const decrypted = await Promise.all(
-        rows.map(async (row) => ({ row, content: await decryptItemContent(row, vmk!) })),
-      );
-      if (!cancelled) {
-        setItems(decrypted);
-        setLoading(false);
-      }
-    }
-    load();
-
-    const unsubscribe = subscribeToVaultItems(supabase, vaultId, async ({ eventType, row }) => {
-      if (!row) return;
-      if (eventType === "DELETE" || row.is_deleted) {
-        useAppStore.getState().removeItem(row.id);
-        return;
-      }
-      const content = await decryptItemContent(row, vmk!);
-      useAppStore.getState().upsertItem({ row, content });
-    });
-
-    return () => {
-      cancelled = true;
-      unsubscribe();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vaultId, vmk]);
 
   const filtered = useMemo(() => {
     if (!query.trim()) return items;
@@ -109,7 +76,9 @@ export function VaultHomeScreen() {
                     <p className="truncate text-xs text-white/60">{content.username}</p>
                   )}
                 </div>
-                <span className="text-xs uppercase tracking-wide text-white/35">{row.type}</span>
+                <span className="text-base" aria-label={row.type} title={row.type}>
+                  {TYPE_GLYPH[row.type] ?? "🔒"}
+                </span>
               </button>
             </li>
           ))}
