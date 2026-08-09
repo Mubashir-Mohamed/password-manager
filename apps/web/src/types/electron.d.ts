@@ -18,6 +18,10 @@ export interface ElectronAPI {
   updater: {
     onStatus(callback: (status: string) => void): () => void;
   };
+  quickAccess: {
+    hide(): void;
+    resize(height: number): void;
+  };
 }
 
 declare global {

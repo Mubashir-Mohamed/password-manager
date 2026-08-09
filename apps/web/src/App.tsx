@@ -6,6 +6,7 @@ import { useAppStore } from "./state/store.js";
 import { useAutoLock } from "./lib/useAutoLock.js";
 import { useVaultSync } from "./lib/useVaultSync.js";
 import { useIsDesktopWidth } from "./lib/useIsDesktopWidth.js";
+import { onLockRequested } from "./lib/desktopBridge.js";
 import { WelcomeScreen } from "./screens/WelcomeScreen.js";
 import { SignUpCredentialsScreen } from "./screens/SignUpCredentialsScreen.js";
 import { SignUpSecretKeyScreen } from "./screens/SignUpSecretKeyScreen.js";
@@ -31,6 +32,9 @@ export function App() {
   useAutoLock();
   useVaultSync();
   const isDesktopWidth = useIsDesktopWidth();
+
+  // Tray "Lock now" (desktop only — no-op elsewhere, see lib/desktopBridge.ts).
+  useEffect(() => onLockRequested(() => useAppStore.getState().lock()), []);
 
   // Bootstrap: restore whatever Supabase session persisted (e.g. page
   // reload) and route to Unlock rather than all the way back to Welcome —

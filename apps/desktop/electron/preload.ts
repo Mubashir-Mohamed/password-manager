@@ -36,4 +36,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
       return () => ipcRenderer.removeListener("updater:status", listener);
     },
   },
+
+  /** Only meaningful from the Quick Access overlay renderer (desktop design
+   * plan §4.2) — the main-window renderer never calls these. The overlay
+   * can't touch its own BrowserWindow directly (contextIsolation), so hide/
+   * resize go through the main process. */
+  quickAccess: {
+    hide: (): void => ipcRenderer.send("quick-access:hide"),
+    resize: (height: number): void => ipcRenderer.send("quick-access:resize", height),
+  },
 });

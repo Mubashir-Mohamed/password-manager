@@ -3,6 +3,7 @@ import type { Session } from "@supabase/supabase-js";
 import type { Database } from "@password-manager/api-client";
 import type { VaultItemContent } from "@password-manager/core-domain";
 import type { Keypair } from "@password-manager/core-crypto";
+import { notifyLocked, notifyUnlocked } from "../lib/desktopBridge.js";
 
 export type Screen =
   | "welcome"
@@ -80,7 +81,10 @@ export const useAppStore = create<AppState>((set) => ({
   setScreen: (screen) => set({ screen }),
   setSession: (session) => set({ session }),
   setProfile: (profile) => set({ profile }),
-  setUnlocked: (vmk, keypair) => set({ vmk, keypair }),
+  setUnlocked: (vmk, keypair) => {
+    notifyUnlocked(); // no-op off Electron — see lib/desktopBridge.ts
+    set({ vmk, keypair });
+  },
   setVaultId: (vaultId) => set({ vaultId }),
   setItems: (items) => set({ items }),
   setItemsLoading: (itemsLoading) => set({ itemsLoading }),
@@ -94,12 +98,14 @@ export const useAppStore = create<AppState>((set) => ({
   setPendingSecretKey: (pendingSecretKey) => set({ pendingSecretKey }),
   showToast: (toast) => set({ toast }),
   clearToast: () => set({ toast: null }),
-  lock: () =>
+  lock: () => {
+    notifyLocked(); // no-op off Electron — see lib/desktopBridge.ts
     set({
       vmk: null,
       keypair: null,
       items: [],
       activeItemId: null,
       screen: "unlock",
-    }),
+    });
+  },
 }));
