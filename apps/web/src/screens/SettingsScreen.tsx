@@ -32,6 +32,7 @@ export function SettingsScreen() {
           module's TODO on tailwind-merge) so the divider rows sit flush. */}
       <div className="flex flex-col divide-y divide-white/[0.06] overflow-hidden rounded-md border border-white/[0.08] bg-surface">
         <SettingsRow label="Security" description="Weak, reused, and breached passwords" onClick={() => setScreen("security")} />
+        <SettingsRow label="Sharing" description="Items shared with you, and by you" onClick={() => setScreen("shared")} />
         <SettingsRow label="Import & Export" description="CSV import, encrypted vault export" onClick={() => setScreen("import-export")} />
       </div>
 

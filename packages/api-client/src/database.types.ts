@@ -164,6 +164,10 @@ export interface Database {
           from_user_id: string;
           to_user_id: string;
           wrapped_item_key: WrappedPayloadRow;
+          // Sender's X25519 public key at share time — see
+          // 0005_shared_items_sender_public_key.sql for why this is
+          // denormalized here rather than looked up from profiles.
+          from_public_key: string;
           permission: SharePermission;
           created_at: string;
           revoked_at: string | null;
@@ -174,6 +178,7 @@ export interface Database {
           from_user_id: string;
           to_user_id: string;
           wrapped_item_key: WrappedPayloadRow;
+          from_public_key: string;
           permission?: SharePermission;
         };
         Update: {

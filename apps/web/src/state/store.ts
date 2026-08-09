@@ -14,6 +14,7 @@ export type Screen =
   | "generator"
   | "security"
   | "import-export"
+  | "shared"
   | "settings";
 
 export interface DecryptedItem {
