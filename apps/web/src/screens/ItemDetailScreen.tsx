@@ -4,6 +4,7 @@ import { currentTotpCode } from "@password-manager/core-crypto";
 import type { LoginContent } from "@password-manager/core-domain";
 import { createVaultItem, softDeleteVaultItem, updateVaultItem } from "@password-manager/api-client";
 import { encryptNewItem, encryptUpdatedItem } from "../lib/vaultCrypto.js";
+import { shareItemWithEmail } from "../lib/sharing.js";
 import { supabase } from "../lib/supabase.js";
 import { useAppStore } from "../state/store.js";
 
@@ -17,6 +18,8 @@ const emptyLogin: LoginContent = { kind: "login", title: "", username: "", passw
 export function ItemDetailScreen() {
   const vaultId = useAppStore((s) => s.vaultId);
   const vmk = useAppStore((s) => s.vmk);
+  const keypair = useAppStore((s) => s.keypair);
+  const profile = useAppStore((s) => s.profile);
   const activeItemId = useAppStore((s) => s.activeItemId);
   const items = useAppStore((s) => s.items);
   const upsertItem = useAppStore((s) => s.upsertItem);
@@ -30,6 +33,11 @@ export function ItemDetailScreen() {
   );
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  const [sharing, setSharing] = useState(false);
+  const [shareEmail, setShareEmail] = useState("");
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
 
   async function copy(text: string) {
     await navigator.clipboard.writeText(text);
@@ -69,6 +77,36 @@ export function ItemDetailScreen() {
       setScreen("vault");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleShare() {
+    if (!existing || !vmk || !keypair || !profile || !shareEmail) return;
+    setShareBusy(true);
+    setShareError(null);
+    try {
+      const result = await shareItemWithEmail(supabase, {
+        itemId: existing.row.id,
+        itemWrappedKey: existing.row.wrapped_item_key,
+        recipientEmail: shareEmail,
+        vmk,
+        myUserId: profile.id,
+        myPublicKey: keypair.publicKey,
+        myPrivateKey: keypair.privateKey,
+      });
+      if (result.shared) {
+        showToast({ message: `Shared with ${shareEmail}`, tone: "success" });
+        setShareEmail("");
+        setSharing(false);
+      } else if (result.reason === "not-found") {
+        setShareError("No account found for that email.");
+      } else if (result.reason === "self") {
+        setShareError("You can't share an item with yourself.");
+      } else {
+        setShareError("Couldn't share this item. Try again.");
+      }
+    } finally {
+      setShareBusy(false);
     }
   }
 
@@ -121,11 +159,32 @@ export function ItemDetailScreen() {
           {busy ? "Saving…" : "Save"}
         </Button>
         {existing && (
+          <Button variant="secondary" onClick={() => setSharing((s) => !s)}>
+            Share
+          </Button>
+        )}
+        {existing && (
           <Button variant="destructive" onClick={() => setConfirmingDelete(true)}>
             Delete
           </Button>
         )}
       </div>
+
+      {sharing && existing && (
+        <div className="flex flex-col gap-3 rounded-md border border-white/[0.08] bg-surface p-4">
+          <TextField
+            label="Share with (email)"
+            type="email"
+            value={shareEmail}
+            onChange={(e) => setShareEmail(e.target.value)}
+            error={shareError ?? undefined}
+            hint="They must already have an account. Read-only for now."
+          />
+          <Button onClick={handleShare} disabled={shareBusy || !shareEmail}>
+            {shareBusy ? "Sharing…" : "Share"}
+          </Button>
+        </div>
+      )}
 
       {confirmingDelete && (
         <div className="fixed inset-0 flex items-center justify-center bg-black/60 p-5">

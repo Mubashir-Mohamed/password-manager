@@ -20,6 +20,10 @@ export async function shareItem(
   params: {
     itemId: string;
     fromUserId: string;
+    /** Sender's own X25519 public key — stored on the row so the recipient
+     * can open the crypto_box without needing SELECT access to the sender's
+     * profiles row (see 0005_shared_items_sender_public_key.sql). */
+    fromPublicKey: string;
     toUserId: string;
     wrappedItemKeyForRecipient: WrappedPayloadRow; // built with core-crypto's boxForRecipient()
     permission?: "read" | "write";
@@ -30,6 +34,7 @@ export async function shareItem(
     .insert({
       item_id: params.itemId,
       from_user_id: params.fromUserId,
+      from_public_key: params.fromPublicKey,
       to_user_id: params.toUserId,
       wrapped_item_key: params.wrappedItemKeyForRecipient,
       permission: params.permission ?? "read",

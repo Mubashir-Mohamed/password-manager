@@ -8,6 +8,7 @@ export {
   createVault,
   listVaults,
   listVaultItems,
+  fetchVaultItemsByIds,
   createVaultItem,
   updateVaultItem,
   softDeleteVaultItem,

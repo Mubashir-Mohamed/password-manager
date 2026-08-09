@@ -35,6 +35,21 @@ export async function listVaultItems(
   return data;
 }
 
+/** Fetches specific vault_items rows by id, regardless of which vault they
+ * belong to — for the "shared with me" case, where the caller doesn't own
+ * the vault and can't list it via `listVaultItems`, but RLS's
+ * `vault_items_select_owner_or_shared` policy still lets them SELECT the
+ * specific rows a non-revoked share grants them. */
+export async function fetchVaultItemsByIds(
+  client: PasswordManagerClient,
+  itemIds: string[],
+): Promise<VaultItemRow[]> {
+  if (itemIds.length === 0) return [];
+  const { data, error } = await client.from("vault_items").select("*").in("id", itemIds);
+  if (error) throw error;
+  return data;
+}
+
 export async function createVaultItem(client: PasswordManagerClient, item: VaultItemInsert) {
   const { data, error } = await client.from("vault_items").insert(item).select().single();
   if (error) throw error;

@@ -35,7 +35,7 @@
 -- Still run this file through pgTAP before trusting it in CI — the scenarios
 -- are confirmed, the pgTAP wrapper syntax itself is not.
 begin;
-select plan(10);
+select plan(12);
 
 -- Two fake users, inserted directly (bypassing auth.users' normal signup flow
 -- — fine for a schema-level RLS test, since RLS only cares about auth.uid()).
@@ -94,9 +94,9 @@ select throws_ok(
 -- that's a client-side concern, not RLS's).
 set local request.jwt.claims = '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated"}';
 
-insert into public.shared_items (item_id, from_user_id, to_user_id, wrapped_item_key, permission) values
+insert into public.shared_items (item_id, from_user_id, to_user_id, wrapped_item_key, from_public_key, permission) values
   ('b1b1b1b1-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111',
-   '22222222-2222-2222-2222-222222222222', '{"nonce":"n","ciphertext":"c"}', 'read');
+   '22222222-2222-2222-2222-222222222222', '{"nonce":"n","ciphertext":"c"}', 'alice-pub-key-b64', 'read');
 
 set local request.jwt.claims = '{"sub":"22222222-2222-2222-2222-222222222222","role":"authenticated"}';
 
@@ -104,6 +104,20 @@ select is(
   (select count(*)::int from public.vault_items where id = 'b1b1b1b1-0000-0000-0000-000000000001'),
   1,
   'Bob CAN see the item once Alice shares it with him'
+);
+
+-- Security-critical for secure sharing (0005_shared_items_sender_public_key.sql):
+-- Bob needs Alice's public key to open the crypto_box, but must NOT be able
+-- to read her profiles row directly (RLS restricts that to id = auth.uid()).
+select is(
+  (select count(*)::int from public.profiles where id = '11111111-1111-1111-1111-111111111111'),
+  0,
+  'Bob cannot read Alice''s profile row directly'
+);
+select is(
+  (select from_public_key from public.shared_items where to_user_id = '22222222-2222-2222-2222-222222222222'),
+  'alice-pub-key-b64',
+  'Bob CAN read Alice''s public key off the shared_items row he participates in — this is how he opens the crypto_box without profile access'
 );
 
 select throws_ok(
