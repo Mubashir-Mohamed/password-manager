@@ -3,23 +3,41 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { Text, View } from "react-native";
 import type { Session } from "@supabase/supabase-js";
-import { fetchOwnProfile, listVaultItems, onAuthStateChange } from "@password-manager/api-client";
+import {
+  createVaultItem,
+  fetchOwnProfile,
+  listVaultItems,
+  onAuthStateChange,
+  softDeleteVaultItem,
+  subscribeToVaultItems,
+  updateVaultItem,
+} from "@password-manager/api-client";
 import type { Database } from "@password-manager/api-client";
 import { fromBase64, toBase64 } from "@password-manager/core-crypto";
-import { decryptItemContent, unlockOnNewDevice, unlockSameDevice } from "./src/lib/vaultCrypto.js";
+import type { LoginContent } from "@password-manager/core-domain";
+import {
+  decryptItemContent,
+  encryptNewItem,
+  encryptUpdatedItem,
+  unlockOnNewDevice,
+  unlockSameDevice,
+} from "./src/lib/vaultCrypto.js";
 import { saveQuickUnlockSecret } from "./src/lib/biometrics.js";
 import { supabase } from "./src/lib/supabase.js";
 import { UnlockScreen } from "./src/screens/UnlockScreen.js";
 import { VaultHomeScreen, type DecryptedItem } from "./src/screens/VaultHomeScreen.js";
+import { ItemDetailScreen } from "./src/screens/ItemDetailScreen.js";
 
-type Screen = "loading" | "unlock" | "vault";
+type Screen = "loading" | "unlock" | "vault" | "item";
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("loading");
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Database["public"]["Tables"]["profiles"]["Row"] | null>(null);
   const [vmk, setVmk] = useState<Uint8Array | null>(null);
+  const [vaultId, setVaultId] = useState<string | null>(null);
   const [items, setItems] = useState<DecryptedItem[]>([]);
+  const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [loadingItems, setLoadingItems] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,22 +54,51 @@ export default function App() {
     return () => sub.subscription.unsubscribe();
   }, []);
 
+  // Load the vault once unlocked, then keep it in sync via Realtime
+  // (postgres_changes, RLS-scoped) — same pattern as apps/web's
+  // VaultHomeScreen, build plan §4/§7 step 6 "Mobile core: auth/CRUD/sync".
+  // Runs once per unlock, independent of which screen ("vault" or "item")
+  // is currently showing, so the subscription doesn't drop while editing.
   useEffect(() => {
-    if (screen !== "vault" || !vmk || !session) return;
-    setLoadingItems(true);
-    (async () => {
+    if (!vmk || !session) return;
+    let cancelled = false;
+
+    async function load() {
+      setLoadingItems(true);
       const { data: vaults } = await supabase.from("vaults").select("id").limit(1);
-      const vaultId = vaults?.[0]?.id;
-      if (!vaultId) {
-        setLoadingItems(false);
+      const id = vaults?.[0]?.id;
+      if (!id) {
+        if (!cancelled) setLoadingItems(false);
         return;
       }
-      const rows = await listVaultItems(supabase, vaultId);
-      const decrypted = await Promise.all(rows.map(async (row) => ({ row, content: await decryptItemContent(row, vmk) })));
-      setItems(decrypted);
-      setLoadingItems(false);
-    })();
-  }, [screen, vmk, session]);
+      if (cancelled) return;
+      setVaultId(id);
+      const rows = await listVaultItems(supabase, id);
+      const decrypted = await Promise.all(rows.map(async (row) => ({ row, content: await decryptItemContent(row, vmk!) })));
+      if (!cancelled) {
+        setItems(decrypted);
+        setLoadingItems(false);
+      }
+
+      const unsubscribe = subscribeToVaultItems(supabase, id, async ({ row }) => {
+        if (!row) return;
+        if (row.is_deleted) {
+          setItems((prev) => prev.filter((i) => i.row.id !== row.id));
+          return;
+        }
+        const content = await decryptItemContent(row, vmk!);
+        setItems((prev) => [{ row, content }, ...prev.filter((i) => i.row.id !== row.id)]);
+      });
+      cleanup = unsubscribe;
+    }
+    let cleanup: (() => void) | undefined;
+    load();
+
+    return () => {
+      cancelled = true;
+      cleanup?.();
+    };
+  }, [vmk, session]);
 
   async function handleUnlock({
     email,
@@ -98,6 +145,52 @@ export default function App() {
     }
   }
 
+  const activeItem = items.find((i) => i.row.id === activeItemId) ?? null;
+
+  async function handleSaveItem(content: LoginContent) {
+    if (!vmk) return;
+    setBusy(true);
+    try {
+      if (activeItem) {
+        const { wrappedItemKey, encryptedContent } = await encryptUpdatedItem(
+          activeItem.row.id,
+          activeItem.row.version + 1,
+          content,
+          activeItem.row.wrapped_item_key,
+          vmk,
+        );
+        const updated = await updateVaultItem(supabase, activeItem.row.id, activeItem.row.version, {
+          wrapped_item_key: wrappedItemKey,
+          content: encryptedContent,
+        });
+        if (updated) setItems((prev) => [{ row: updated, content }, ...prev.filter((i) => i.row.id !== updated.id)]);
+      } else {
+        if (!vaultId) return;
+        const { id, wrappedItemKey, encryptedContent } = await encryptNewItem(content, vmk);
+        const row = await createVaultItem(supabase, {
+          id,
+          vault_id: vaultId,
+          type: "login",
+          wrapped_item_key: wrappedItemKey,
+          content: encryptedContent,
+        });
+        setItems((prev) => [{ row, content }, ...prev]);
+      }
+      setActiveItemId(null);
+      setScreen("vault");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDeleteItem() {
+    if (!activeItem) return;
+    await softDeleteVaultItem(supabase, activeItem.row.id);
+    setItems((prev) => prev.filter((i) => i.row.id !== activeItem.row.id));
+    setActiveItemId(null);
+    setScreen("vault");
+  }
+
   return (
     <SafeAreaProvider>
       <StatusBar style="light" />
@@ -120,13 +213,26 @@ export default function App() {
         <VaultHomeScreen
           items={items}
           loading={loadingItems}
-          onSelectItem={() => {
-            // Item detail / add-item screens are a fast-follow on mobile —
-            // this scaffold demonstrates unlock → decrypt → list end-to-end,
-            // matching the build plan's "Mobile core: auth/CRUD/sync" milestone
-            // ordering (CRUD screens ship after web's are proven out).
+          onSelectItem={(itemId) => {
+            setActiveItemId(itemId);
+            setScreen("item");
           }}
-          onAddItem={() => {}}
+          onAddItem={() => {
+            setActiveItemId(null);
+            setScreen("item");
+          }}
+        />
+      )}
+      {screen === "item" && (
+        <ItemDetailScreen
+          existing={activeItem}
+          busy={busy}
+          onBack={() => {
+            setActiveItemId(null);
+            setScreen("vault");
+          }}
+          onSave={handleSaveItem}
+          onDelete={handleDeleteItem}
         />
       )}
     </SafeAreaProvider>
