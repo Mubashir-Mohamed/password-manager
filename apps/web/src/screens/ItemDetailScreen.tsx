@@ -10,12 +10,23 @@ import { useAppStore } from "../state/store.js";
 
 const emptyLogin: LoginContent = { kind: "login", title: "", username: "", password: "", urls: [], notes: "" };
 
+export interface ItemDetailScreenProps {
+  /** Renders as a detail *pane* inside DesktopVaultShell's three-pane layout
+   * (desktop design plan §4.1) instead of a full-page screen: no back
+   * button, no page-level padding, and Save/Delete don't navigate away
+   * (there's nowhere to navigate to — the pane just reflects the current
+   * selection). The caller is expected to remount this component (e.g. via
+   * a `key` on `activeItemId`) when the selected item changes, same as
+   * every other piece of local form state here. */
+  embedded?: boolean;
+}
+
 /** Handles both "add new login" (no activeItemId) and "view/edit existing
  * item" — MVP scope covers the `login` item type end-to-end; note/card/
  * identity share the same envelope-encryption path (encryptNewItem/
  * decryptItemContent) and just need their own form fields, following this
  * one as a template. */
-export function ItemDetailScreen() {
+export function ItemDetailScreen({ embedded = false }: ItemDetailScreenProps = {}) {
   const vaultId = useAppStore((s) => s.vaultId);
   const vmk = useAppStore((s) => s.vmk);
   const keypair = useAppStore((s) => s.keypair);
@@ -25,6 +36,7 @@ export function ItemDetailScreen() {
   const upsertItem = useAppStore((s) => s.upsertItem);
   const removeItem = useAppStore((s) => s.removeItem);
   const setScreen = useAppStore((s) => s.setScreen);
+  const setActiveItemId = useAppStore((s) => s.setActiveItemId);
   const showToast = useAppStore((s) => s.showToast);
 
   const existing = items.find((i) => i.row.id === activeItemId);
@@ -72,9 +84,12 @@ export function ItemDetailScreen() {
           content: encryptedContent,
         });
         upsertItem({ row, content: form });
+        // Embedded (desktop three-pane): select the just-created item so the
+        // detail pane reflects it — no navigation to bounce through.
+        if (embedded) setActiveItemId(row.id);
       }
       showToast({ message: "Saved", tone: "success" });
-      setScreen("vault");
+      if (!embedded) setScreen("vault");
     } finally {
       setBusy(false);
     }
@@ -115,16 +130,19 @@ export function ItemDetailScreen() {
     await softDeleteVaultItem(supabase, existing.row.id);
     removeItem(existing.row.id);
     showToast({ message: "Deleted", tone: "default" });
-    setScreen("vault");
+    if (embedded) setActiveItemId(null);
+    else setScreen("vault");
   }
 
   const totp = form.totp ? currentTotpCode(form.totp.secret, form.totp) : null;
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-md flex-col gap-5 px-5 py-6">
-      <button className="self-start text-sm text-white/60 hover:text-white/85" onClick={() => setScreen("vault")}>
-        ← Back
-      </button>
+    <div className={embedded ? "flex flex-col gap-5 p-6" : "mx-auto flex min-h-screen max-w-md flex-col gap-5 px-5 py-6"}>
+      {!embedded && (
+        <button className="self-start text-sm text-white/60 hover:text-white/85" onClick={() => setScreen("vault")}>
+          ← Back
+        </button>
+      )}
       <h1 className="text-lg font-semibold text-white/95">{existing ? form.title || "Edit item" : "Add login"}</h1>
 
       <TextField label="Name" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />

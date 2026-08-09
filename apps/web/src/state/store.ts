@@ -39,6 +39,7 @@ interface AppState {
 
   vaultId: string | null;
   items: DecryptedItem[];
+  itemsLoading: boolean;
   activeItemId: string | null;
 
   pendingSecretKey: string | null; // transient — only alive during the signup reveal step
@@ -50,6 +51,7 @@ interface AppState {
   setUnlocked: (vmk: Uint8Array, keypair: Keypair) => void;
   setVaultId: (id: string) => void;
   setItems: (items: DecryptedItem[]) => void;
+  setItemsLoading: (loading: boolean) => void;
   upsertItem: (item: DecryptedItem) => void;
   removeItem: (itemId: string) => void;
   setActiveItemId: (id: string | null) => void;
@@ -70,6 +72,7 @@ export const useAppStore = create<AppState>((set) => ({
   keypair: null,
   vaultId: null,
   items: [],
+  itemsLoading: false,
   activeItemId: null,
   pendingSecretKey: null,
   toast: null,
@@ -80,6 +83,7 @@ export const useAppStore = create<AppState>((set) => ({
   setUnlocked: (vmk, keypair) => set({ vmk, keypair }),
   setVaultId: (vaultId) => set({ vaultId }),
   setItems: (items) => set({ items }),
+  setItemsLoading: (itemsLoading) => set({ itemsLoading }),
   upsertItem: (item) =>
     set((state) => ({
       items: [item, ...state.items.filter((existing) => existing.row.id !== item.row.id)],
