@@ -1,0 +1,10 @@
+# False positives, verified by running gitleaks locally (Homebrew has a
+# formula; CI's gitleaks-action doesn't surface findings inline, so this was
+# diagnosed by installing gitleaks and running it against the repo directly).
+#
+# RFC 6238 Appendix B's published SHA-1 test secret ("12345678901234567890"
+# ASCII, base32-encoded) — a public test vector, not a real credential.
+# gitleaks' generic-api-key rule flags it on entropy alone. Already merged at
+# commit b5c3f5a, so a code-only fix wouldn't suppress the historical finding
+# — .gitleaksignore is the documented mechanism for that.
+b5c3f5ac63bdcdd18010a58245359fc54c963a8f:packages/core-crypto/src/index.test.ts:generic-api-key:164

@@ -32,8 +32,20 @@
 --      first attempt at that fix (`revoke ... from public`) was itself
 --      verified to be a no-op, since Supabase's bootstrap grants EXECUTE to
 --      `anon` explicitly, not just implicitly via PUBLIC.
--- Still run this file through pgTAP before trusting it in CI — the scenarios
--- are confirmed, the pgTAP wrapper syntax itself is not.
+--
+-- Update: this file has since actually been run through real pgTAP (built
+-- from source locally — Homebrew has no pgtap formula — against Postgres 14),
+-- not just informal psql checks, which caught two more real bugs in the
+-- TEST FILE ITSELF (not the schema): `throws_ok` was used for RLS-blocked
+-- UPDATEs, but Postgres RLS silently filters those to 0 rows affected — it
+-- never raises an exception (this is precisely the /supabase skill's own
+-- "UPDATE requires a SELECT policy... updates silently return 0 rows, no
+-- error" gotcha, just encountered from the test-writing side instead of the
+-- policy-writing side). The fix attempt after that — wrapping the UPDATE in
+-- a writable CTE inside `is()`'s subquery argument — also failed, since
+-- Postgres requires data-modifying CTEs to be at the top level of the query,
+-- not nested inside another subquery. Both are now bare top-level UPDATEs
+-- followed by a value-unchanged assertion. All 12 tests pass for real.
 begin;
 select plan(12);
 
@@ -82,12 +94,30 @@ select is(
   'Bob cannot see Alice''s vault item (not shared)'
 );
 
-select throws_ok(
-  $$ update public.vault_items set favorite = true where id = 'b1b1b1b1-0000-0000-0000-000000000001' $$,
-  null,
-  null,
-  'Bob cannot update Alice''s vault item'
+-- NOT throws_ok: Postgres RLS silently filters an UPDATE to 0 affected rows
+-- when the row fails the policy's USING clause — it does not raise an
+-- exception. Confirmed by actually running this suite through real pgTAP
+-- (not just the informal psql checks used while writing each migration):
+-- the throws_ok version of this assertion failed with "caught: no
+-- exception", which is Postgres behaving correctly — the bug was in the
+-- test's expectation, not the RLS policy. A second attempt (wrapping the
+-- UPDATE in a writable CTE inside `is()`'s subquery argument) also failed —
+-- Postgres requires a data-modifying CTE to be at the query's top level, not
+-- nested inside another subquery — so the UPDATE runs bare here, top-level,
+-- and the assertion checks its effect (unchanged) afterward instead.
+update public.vault_items set favorite = true
+  where id = 'b1b1b1b1-0000-0000-0000-000000000001';
+
+-- Switch back to Alice to check the actual stored value, not just what Bob
+-- can see — proves the blocked update had zero effect on the row, not just
+-- that it's invisible to Bob (test 3 already covers that).
+set local request.jwt.claims = '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated"}';
+select is(
+  (select favorite from public.vault_items where id = 'b1b1b1b1-0000-0000-0000-000000000001'),
+  false,
+  'Bob''s blocked update never touched the actual row — Alice still sees favorite = false'
 );
+set local request.jwt.claims = '{"sub":"22222222-2222-2222-2222-222222222222","role":"authenticated"}';
 
 -- Alice shares the item with Bob (read-only) — now Bob should be able to
 -- SELECT the row (still can't decrypt it without his own wrapped key, but
@@ -120,12 +150,20 @@ select is(
   'Bob CAN read Alice''s public key off the shared_items row he participates in — this is how he opens the crypto_box without profile access'
 );
 
-select throws_ok(
-  $$ update public.vault_items set favorite = true where id = 'b1b1b1b1-0000-0000-0000-000000000001' $$,
-  null,
-  null,
-  'Bob still cannot UPDATE the shared item (read-only share, no write-permission policy branch in Phase 1)'
+-- Same fix as the earlier assertion — bare top-level UPDATE, then verify the
+-- value as Alice (Bob CAN see this row now, since it's shared with him, but
+-- the UPDATE policy's USING clause — is_vault_owner(vault_id) — still blocks
+-- a non-owner write, silently, to 0 rows affected).
+update public.vault_items set favorite = true
+  where id = 'b1b1b1b1-0000-0000-0000-000000000001';
+
+set local request.jwt.claims = '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated"}';
+select is(
+  (select favorite from public.vault_items where id = 'b1b1b1b1-0000-0000-0000-000000000001'),
+  false,
+  'Bob still cannot UPDATE the shared item (read-only share, no write-permission policy branch in Phase 1) — value unchanged'
 );
+set local request.jwt.claims = '{"sub":"22222222-2222-2222-2222-222222222222","role":"authenticated"}';
 
 -- Revoke and confirm access is gone again.
 set local request.jwt.claims = '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated"}';
