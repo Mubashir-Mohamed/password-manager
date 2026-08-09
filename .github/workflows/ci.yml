@@ -14,7 +14,18 @@ jobs:
   lint-typecheck-test:
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 (full history) — gitleaks-action diffs a commit range
+      # (`<parent-of-first-new-commit>..<head>`) to scan only what a push
+      # actually introduced. actions/checkout@v4's default fetch-depth: 1
+      # (shallow clone) means that parent commit doesn't exist locally, so
+      # git's range syntax fails with "unknown revision", gitleaks reports
+      # "failed to scan Git repository", and the action exits non-zero even
+      # with zero real findings. Found via a live CI failure, not by
+      # inspection — the shallow-clone default is easy to miss since gitleaks
+      # runs and produces (empty, correct) output right up until this error.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # No `version:` here — pnpm/action-setup@v4 reads it from package.json's
       # `packageManager` field. Passing both errors with ERR_PNPM_BAD_PM_VERSION
