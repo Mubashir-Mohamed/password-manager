@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The extension's entire UI — mobile design plan §4/§7's "own minimal UI
+     (search + biometric unlock), not the main app UI". Plain Android Views,
+     not Compose, to avoid adding Jetpack Compose tooling to the Gradle build
+     just for this one small screen. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#0E0F13"
+    android:padding="16dp">
+
+    <ProgressBar
+        android:id="@+id/progress"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:layout_marginTop="64dp"
+        android:indeterminateTint="#6C5CE7" />
+
+    <TextView
+        android:id="@+id/message"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="48dp"
+        android:gravity="center"
+        android:textColor="#99FFFFFF"
+        android:visibility="gone" />
+
+    <EditText
+        android:id="@+id/search"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Search vault"
+        android:textColorHint="#59FFFFFF"
+        android:textColor="#FFFFFFFF"
+        android:background="@android:color/transparent"
+        android:inputType="text"
+        android:visibility="gone" />
+
+    <ListView
+        android:id="@+id/items"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:visibility="gone" />
+
+</LinearLayout>

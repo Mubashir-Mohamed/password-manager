@@ -291,3 +291,77 @@ the plan above:
     directly) before trusting this beyond "the surrounding plumbing works."
   - Android `AutofillService` is a separate, not-yet-started effort —
     `autofillSync.ts` already no-ops on Android in anticipation.
+- **§7 step 7 (Android native autofill), first pass:** `native/android/autofill/`
+  (Kotlin, registered into the generated project by
+  `plugins/withAndroidAutofillService.js`) — `PasswordManagerAutofillService`
+  (`AutofillService`) + `AutofillUnlockActivity` (the biometric-gated picker
+  UI, Android's standard `Dataset.Builder#setAuthentication` pattern) + a
+  decrypt-only crypto port + a Keystore-backed VMK cache + a plain
+  SharedPreferences ciphertext cache (no App Group equivalent needed — same
+  app process, unlike iOS).
+  - **No NDK needed, unlike iOS.** Android has no libsodium `.so` bound to
+    anything callable from arbitrary Kotlin (react-native-libsodium's own
+    JNI bridge only installs a JSI binding for JS, not a Java/Kotlin API),
+    and this sandbox has no NDK installed to build a custom JNI shim against
+    the vendored `.so` anyway. Used Bouncy Castle's `XChaCha20Poly1305`
+    (`org.bouncycastle.crypto.modes.XChaCha20Poly1305`, needs
+    bcprov-jdk18on **>= ~1.80** — 1.79 doesn't have the class yet) instead —
+    pure JVM, no native compilation. **Cross-checked, not assumed:** a real
+    ciphertext produced by core-crypto's actual `encryptItem` (WASM
+    libsodium) was decrypted with Bouncy Castle 1.85.2 using the identical
+    key/nonce/aad and recovered byte-identical plaintext (ad hoc script, not
+    committed — reproducible via `packages/core-crypto`'s exports + a
+    `bcprov-jdk18on` jar from Maven Central).
+  - VMK cache is Android Keystore-encrypted (AES-256-GCM, hardware-backed)
+    but deliberately **not** `setUserAuthenticationRequired(true)` on the
+    key itself — that would force a second biometric prompt on the main app
+    immediately after every unlock. The biometric gate that matters is
+    `AutofillUnlockActivity`'s own `BiometricPrompt` call before it *reads*
+    the cache — see `VaultKeystore.kt`'s header comment. Same posture as
+    desktop's Electron `safeStorage` cache.
+  - **Verified — genuinely, not just "it compiles against a stub":**
+    `expo prebuild --platform android` generates the service/activity/
+    dependencies cleanly, and **`./gradlew :app:compileDebugKotlin` is
+    BUILD SUCCESSFUL from a clean prebuild** — every file in
+    `native/android/autofill/` (including the real
+    `androidx.biometric.BiometricPrompt` and Bouncy Castle usage) compiles
+    against the real Android SDK (platforms up to 35 were present) and the
+    real dependency graph. This is materially stronger verification than
+    the iOS side got (blocked entirely on a missing Xcode platform
+    component) — Android needed no missing SDK component, just a JDK
+    (17, present) and the Gradle wrapper (downloads itself).
+  - Two **pre-existing, unrelated** issues were hit and fixed/documented
+    along the way (present in this Expo SDK 52 / RN 0.76 template
+    regardless of autofill):
+    1. `expo-modules-core` 2.2.3's Compose integration needs a Compose
+       Compiler version that requires Kotlin 1.9.25+, but the generated
+       `android/build.gradle`'s buildscript classpath resolves
+       `kotlin-gradle-plugin` to 1.9.24 (transitively, since it's declared
+       with no explicit version) — `compileDebugKotlin` failed for
+       `expo-modules-core` itself, before ever reaching this project's own
+       code. Fixed persistently via `withKotlinVersionFix` in the same
+       plugin (pins the classpath dependency + forces it repo-wide via
+       `resolutionStrategy`).
+    2. **Not fixed, only documented — full `:app:assembleDebug` is still
+       blocked by this:** the generated
+       `app/build/generated/autolinking/.../PackageList.java` (React
+       Native's own old-arch-interop autolinking, unrelated to Expo's
+       *own* `ExpoModulesPackageList` generator) emits
+       `import expo.core.ExpoModulesPackage;` — a class that doesn't
+       exist. `expo`'s own `react-native.config.js` correctly declares
+       `packageImportPath: 'import expo.modules.ExpoModulesPackage;'`
+       (verified that class does exist), but the generator produces the
+       wrong one anyway, deterministically, even after deleting the
+       generated file and the Gradle daemon — confirmed **not** a stale-
+       cache issue, not something in this project's source, and not
+       triggered by anything in `native/android/` or the new plugin
+       (reproduced by inspecting the generated file directly). This is a
+       real bug somewhere in the RN 0.76 / Expo SDK 52 autolinking
+       resolution chain worth a proper upstream report; a hand-patch of
+       the generated file gets `:app:assembleDebug` building (confirming
+       the rest of the pipeline — resource merging, dexing, packaging — is
+       fine) but isn't a real fix since the file regenerates on every
+       build.
+  - Not started: `onSaveRequest` (offering to save a *new* password from
+    a form) — declines every request for now (`callback.onFailure(...)`),
+    matching this pass's fill-only scope.

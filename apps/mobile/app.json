@@ -23,6 +23,11 @@
       "package": "com.yourorg.passwordmanager",
       "permissions": ["USE_BIOMETRIC", "USE_FINGERPRINT"]
     },
-    "plugins": ["expo-local-authentication", "@bacons/apple-targets", "./plugins/withCredentialsProviderPod.js"]
+    "plugins": [
+      "expo-local-authentication",
+      "@bacons/apple-targets",
+      "./plugins/withCredentialsProviderPod.js",
+      "./plugins/withAndroidAutofillService.js"
+    ]
   }
 }

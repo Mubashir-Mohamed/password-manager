@@ -23,7 +23,7 @@ import {
   unlockSameDevice,
 } from "./src/lib/vaultCrypto.js";
 import { saveQuickUnlockSecret } from "./src/lib/biometrics.js";
-import { syncAutofillCache } from "./src/lib/autofillSync.js";
+import { saveAutofillVmk, syncAutofillCache } from "./src/lib/autofillSync.js";
 import { supabase } from "./src/lib/supabase.js";
 import { UnlockScreen } from "./src/screens/UnlockScreen.js";
 import { VaultHomeScreen, type DecryptedItem } from "./src/screens/VaultHomeScreen.js";
@@ -134,8 +134,12 @@ export default function App() {
       // Best-effort — biometric opt-in is a separate Settings toggle in the
       // full design; here we just cache on every successful full unlock so
       // the "Face ID unlock available" path in UnlockScreen has something to
-      // use next time.
-      saveQuickUnlockSecret(await toBase64(secrets.vmk)).catch(() => {});
+      // use next time. Also feeds native autofill's own biometric-gated VMK
+      // cache (iOS: shared Keychain access group; Android: Keystore-backed
+      // bridge module) — see autofillSync.ts.
+      const vmkBase64 = await toBase64(secrets.vmk);
+      saveQuickUnlockSecret(vmkBase64).catch(() => {});
+      saveAutofillVmk(vmkBase64).catch(() => {});
       setScreen("vault");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unlock failed.");
