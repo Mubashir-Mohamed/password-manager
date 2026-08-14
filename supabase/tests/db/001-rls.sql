@@ -59,8 +59,12 @@
 -- sandbox, so this file's `plan()` count was updated to match but the actual
 -- `supabase test db` run against real pgTAP is still pending, same caveat
 -- the original note above already carries forward from session to session.
+--
+-- Update 3 (0009_shared_write_hardening.sql): a security review of 0007
+-- found the trigger's column allowlist missed `created_at` — added one more
+-- regression test for it below, verified the same way as update 2.
 begin;
-select plan(17);
+select plan(18);
 
 -- Three fake users, inserted directly (bypassing auth.users' normal signup
 -- flow — fine for a schema-level RLS test, since RLS only cares about
@@ -252,6 +256,21 @@ select throws_ok(
   '42501',
   null,
   'Carol cannot use her write share to overwrite wrapped_item_key (or move/retype/delete the item) — only content/version'
+);
+
+-- Regression for a gap a security review caught in the trigger's own
+-- allowlist (0009_shared_write_hardening.sql): created_at was missing from
+-- the blocked-column list, so a write-share recipient could smuggle an
+-- arbitrary created_at through the same UPDATE that legitimately changes
+-- content/version.
+select throws_ok(
+  $$ update public.vault_items
+       set content = '{"nonce":"n3b","ciphertext":"c3b","aad":"x"}', version = 3,
+           created_at = '1970-01-01'
+     where id = 'b1b1b1b1-0000-0000-0000-000000000001' $$,
+  '42501',
+  null,
+  'Carol cannot smuggle an arbitrary created_at through her write share either — same trigger, same column allowlist'
 );
 
 -- Revoke Carol's write share and confirm the UPDATE policy branch closes

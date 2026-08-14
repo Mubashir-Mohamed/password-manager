@@ -457,3 +457,36 @@ the plan above:
     build settings) — a fixable bug in `plugins/withCredentialsProviderPod.js`'s
     Podfile wiring, not attempted yet since the extension itself wasn't
     the focus of this pass.
+- **Security review of 0007_write_permission_sharing.sql, same session as
+  the write-permission-sharing fast-follow above.** A three-stage review
+  (identify → independently re-verify each candidate against the actual
+  migration files, discard anything below high confidence) surfaced two
+  candidates and disqualified both as reportable vulnerabilities — neither
+  had a working exploit path — but both were real, if low-impact, gaps
+  against this project's own established conventions, so both got fixed in
+  `0009_shared_write_hardening.sql` anyway rather than left as documented
+  debt:
+  - `vault_items_update_write_share` was created without `TO authenticated`
+    (defaults to PUBLIC), reintroducing exactly the pattern
+    0004_restrict_policies_and_functions_to_authenticated.sql eliminated
+    project-wide. Not exploitable as written — 0006 only grants table-level
+    UPDATE on `vault_items` to `authenticated` ("No anon grants anywhere"),
+    and Postgres checks the base GRANT before RLS is even evaluated, so
+    `anon` never reaches this policy regardless of its role list — but
+    fixed for consistency regardless.
+  - `restrict_shared_write_columns()`'s column allowlist (vault_id/
+    folder_id/type/wrapped_item_key/favorite/is_deleted/domain_hmac) missed
+    `created_at`, so a write-share recipient could smuggle an arbitrary
+    `created_at` through the same UPDATE that legitimately changes content/
+    version — contradicting the trigger's own stated intent. A repo-wide
+    grep confirmed nothing in this codebase's RLS/edge functions/access
+    control actually reads `vault_items.created_at` (display/sort metadata
+    only), so real-world impact is negligible, but the fix is one line and
+    matches the pattern already used for every other protected column.
+  - Both fixes re-verified the same way as the rest of this session's
+    sharing work: a fresh local Postgres 16 instance, every migration
+    applied in order, plus the actual `supabase/tests/db/001-rls.sql` file
+    (now 18 assertions, +1 for the `created_at` regression) run unmodified
+    through the same pgtap-function shim described above. All pass. Real
+    `supabase test db` / pgTAP still hasn't run in-sandbox — same
+    open item as everywhere else in this addendum.
