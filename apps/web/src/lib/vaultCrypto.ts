@@ -170,6 +170,23 @@ export async function encryptUpdatedItem(
   return { wrappedItemKey: rewrapped, encryptedContent };
 }
 
+/** Re-encrypts a shared item's content for a write-permission recipient.
+ * Unlike `encryptUpdatedItem`, this never touches `wrapped_item_key` — a
+ * recipient has the item's raw key (recovered via `openBox` from their
+ * `shared_items` row, not the owner's VMK-wrapped copy) and the server-side
+ * trigger in 0007_write_permission_sharing.sql rejects any attempt to change
+ * `wrapped_item_key` from a non-owner anyway, so there's nothing to re-wrap
+ * here — just the ciphertext and its version-bound AAD. */
+export async function encryptSharedItemUpdate(
+  itemId: string,
+  nextVersion: number,
+  content: VaultItemContent,
+  itemKey: Uint8Array,
+): Promise<{ encryptedContent: { nonce: string; ciphertext: string; aad: string } }> {
+  const encryptedContent = await encryptItem(JSON.stringify(content), itemKey, `${itemId}:${nextVersion}`);
+  return { encryptedContent };
+}
+
 export async function decryptItemContent(
   row: Database["public"]["Tables"]["vault_items"]["Row"],
   vmk: Uint8Array,

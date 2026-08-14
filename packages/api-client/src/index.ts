@@ -16,7 +16,15 @@ export {
   listFolders,
 } from "./vaults.js";
 
-export { lookupPublicKey, shareItem, revokeShare, listSharedWithMe, listSharedByMe } from "./sharing.js";
+export {
+  lookupPublicKey,
+  shareItem,
+  updateSharePermission,
+  revokeShare,
+  listSharedWithMe,
+  listSharedByMe,
+  UNIQUE_VIOLATION,
+} from "./sharing.js";
 
 export { subscribeToVaultItems } from "./realtime.js";
 

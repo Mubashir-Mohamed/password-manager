@@ -291,6 +291,63 @@ the plan above:
     directly) before trusting this beyond "the surrounding plumbing works."
   - Android `AutofillService` is a separate, not-yet-started effort —
     `autofillSync.ts` already no-ops on Android in anticipation.
+  - **§5 fast-follow — sharing's write-permission + multi-recipient, now built.**
+    0001_init.sql had flagged the missing piece explicitly: "write-permission
+    sharing ... needs a second UPDATE policy branch checking
+    `shared_items.permission = 'write'` — left out of Phase 1 MVP on
+    purpose." That branch (`has_write_share` + a new `vault_items` UPDATE
+    policy, `0007_write_permission_sharing.sql`) is now in, plus a piece the
+    original build plan hadn't called out: RLS authorizes the UPDATE at the
+    row level but has no column-level equivalent, and a write-share
+    recipient never holds the VMK — so they have no legitimate way to
+    produce a new `wrapped_item_key`, move the item to a vault/folder they
+    don't own, or touch its type/favorite/soft-delete state. A `BEFORE
+    UPDATE` trigger (`restrict_shared_write_columns`) closes that gap,
+    checked column-by-column against `OLD`. `0008_shared_items_recipient_
+    email_and_dedup.sql` adds the two things multi-recipient sharing needed
+    to be usable in the UI, not just possible in the schema: `to_email`
+    denormalized onto the row (same reasoning as `from_public_key` in 0005 —
+    the sharer can't SELECT a recipient's `profiles` row after the fact any
+    more than the recipient could the sender's) so "shared by me" can show
+    who each share is with, and a partial unique index
+    (`item_id, to_user_id) where revoked_at is null`) so re-sharing with an
+    already-active recipient updates their permission instead of silently
+    duplicating the row.
+    - **Verified against real Postgres**, same workaround this repo's own
+      pgTAP suite documents using before pgtap was available in-sandbox — a
+      throwaway local Postgres 16 instance (this sandbox has it installed;
+      Docker's daemon does not run here), a stubbed `auth.users`/`auth.uid()`,
+      every migration applied in order. Beyond the ad hoc scenarios (a
+      write-share recipient updating content succeeds; the same recipient
+      trying to smuggle a new `wrapped_item_key` or `vault_id` through the
+      same UPDATE is rejected by the trigger; a revoked write-share loses
+      access; a duplicate active share hits the unique index; permission
+      bump-via-UPDATE works), the actual `supabase/tests/db/001-rls.sql`
+      file itself was run — not just informally checked — against a small
+      hand-written shim reimplementing just the four pgtap functions this
+      suite actually calls (`plan`/`is`/`throws_ok`/`finish`) as plain
+      PL/pgSQL, since the real `pgtap` extension isn't installed in this
+      sandbox either. All 17 assertions (12 pre-existing + 5 new) passed
+      unmodified through that shim. This is corroborating evidence, not a
+      substitute for the real `supabase test db` / real pgTAP run — that's
+      still the authoritative check and still hasn't happened in-sandbox,
+      same caveat the existing pgTAP suite note already carries.
+    - App layer: `shareItemWithEmail` takes a `permission` and is safe to
+      call repeatedly for more recipients on the same item (multi-recipient
+      was already inherent to `shared_items` being one row per
+      item+recipient — the gap was entirely in the UI only ever showing/
+      offering one). A `23505` from the new unique index falls back to
+      `updateSharePermission` rather than surfacing as an error. A
+      write-share recipient's save path is a new function,
+      `encryptSharedItemUpdate` — deliberately *not* `encryptUpdatedItem`,
+      since that one unwraps/rewraps via VMK the recipient never has;
+      the new path re-encrypts with the raw item key `openBox` already
+      recovered and never touches `wrapped_item_key`, matching what the
+      server-side trigger allows. `ItemDetailScreen`'s share panel now shows
+      current recipients (permission dropdown + revoke) inline, and
+      `SharedScreen` groups "shared by me" by item instead of a flat share
+      list, and lets a write-share recipient edit-and-save a shared login
+      directly from "shared with me".
 - **§7 step 7 (Android native autofill), first pass:** `native/android/autofill/`
   (Kotlin, registered into the generated project by
   `plugins/withAndroidAutofillService.js`) — `PasswordManagerAutofillService`

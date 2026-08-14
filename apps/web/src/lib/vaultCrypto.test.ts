@@ -5,6 +5,7 @@ import {
   buildNewAccountMaterial,
   decryptItemContent,
   encryptNewItem,
+  encryptSharedItemUpdate,
   encryptUpdatedItem,
   unwrapAccountSecrets,
   type NewAccountMaterial,
@@ -117,6 +118,52 @@ describe("encryptNewItem / encryptUpdatedItem / decryptItemContent — item roun
         folder_id: null,
         type: "login",
         wrapped_item_key: rewrapped,
+        content: newEncrypted,
+        domain_hmac: null,
+        favorite: false,
+        is_deleted: false,
+        version: 2,
+        created_at: "",
+        updated_at: "",
+      },
+      vmk,
+    );
+    expect(decrypted).toEqual(updated);
+    expect(newEncrypted.aad).toEqual(`${id}:2`);
+    expect(newEncrypted.ciphertext).not.toEqual(encryptedContent.ciphertext);
+  });
+
+  // Write-permission sharing (build plan §5 fast-follow, 0007_write_
+  // permission_sharing.sql): a recipient never holds the VMK, only the raw
+  // item key recovered via openBox — so their save path is
+  // encryptSharedItemUpdate, not encryptUpdatedItem. This is the thing that
+  // actually matters here: the same item key, reused directly (no VMK
+  // involved at all), still round-trips and still gets a fresh
+  // version-bound AAD, matching exactly what the owner's own edit path
+  // produces.
+  it("a write-share recipient's edit (raw item key, no VMK) round-trips identically to the owner's own edit path", async () => {
+    const { generateRandomKey } = await import("@password-manager/core-crypto");
+    const vmk = await generateRandomKey();
+    const { id, wrappedItemKey, encryptedContent } = await encryptNewItem(loginContent, vmk);
+
+    // What the recipient actually has: the item's raw key (as fetchSharedWithMe
+    // hands it to the UI), never the VMK that wraps it for the owner.
+    const { unwrapKey } = await import("@password-manager/core-crypto");
+    const itemKey = await unwrapKey(wrappedItemKey, vmk);
+
+    const updated: LoginContent = { ...loginContent, notes: "edited by a write-share recipient" };
+    const { encryptedContent: newEncrypted } = await encryptSharedItemUpdate(id, 2, updated, itemKey);
+
+    // wrapped_item_key is untouched — the recipient's save path has no
+    // business producing a new one (and the server-side trigger would
+    // reject it if it tried).
+    const decrypted = await decryptItemContent(
+      {
+        id,
+        vault_id: "v",
+        folder_id: null,
+        type: "login",
+        wrapped_item_key: wrappedItemKey,
         content: newEncrypted,
         domain_hmac: null,
         favorite: false,

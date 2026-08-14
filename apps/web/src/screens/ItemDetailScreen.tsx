@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, ConfirmSheet, PasswordField, TOTPCode, TextField } from "@password-manager/ui";
 import { currentTotpCode } from "@password-manager/core-crypto";
 import type { LoginContent } from "@password-manager/core-domain";
-import { createVaultItem, softDeleteVaultItem, updateVaultItem } from "@password-manager/api-client";
+import { createVaultItem, softDeleteVaultItem, updateVaultItem, type SharePermission } from "@password-manager/api-client";
 import { encryptNewItem, encryptUpdatedItem } from "../lib/vaultCrypto.js";
-import { shareItemWithEmail } from "../lib/sharing.js";
+import { fetchSharedByMe, revokeShare, shareItemWithEmail, updateSharePermission, type SharedByMeRow } from "../lib/sharing.js";
 import { supabase } from "../lib/supabase.js";
 import { useAppStore } from "../state/store.js";
 
@@ -48,8 +48,52 @@ export function ItemDetailScreen({ embedded = false }: ItemDetailScreenProps = {
 
   const [sharing, setSharing] = useState(false);
   const [shareEmail, setShareEmail] = useState("");
+  const [sharePermission, setSharePermission] = useState<SharePermission>("read");
   const [shareBusy, setShareBusy] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
+  const [recipients, setRecipients] = useState<SharedByMeRow[] | null>(null);
+  const [recipientBusyId, setRecipientBusyId] = useState<string | null>(null);
+
+  // Multi-recipient sharing (build plan §5 fast-follow): show who this item
+  // is already shared with — read on load whenever an existing item is open,
+  // not gated behind the "Share" panel toggle, since revoking/upgrading
+  // access is useful even without opening the share form.
+  useEffect(() => {
+    if (!existing || !profile) {
+      setRecipients(null);
+      return;
+    }
+    let cancelled = false;
+    fetchSharedByMe(supabase, profile.id).then((rows) => {
+      if (!cancelled) setRecipients(rows.filter((r) => r.itemId === existing.row.id));
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [existing?.row.id, profile?.id]);
+
+  async function handleRevokeRecipient(shareId: string) {
+    setRecipientBusyId(shareId);
+    try {
+      await revokeShare(supabase, shareId);
+      setRecipients((rows) => rows?.filter((r) => r.shareId !== shareId) ?? null);
+      showToast({ message: "Access revoked", tone: "default" });
+    } finally {
+      setRecipientBusyId(null);
+    }
+  }
+
+  async function handleChangeRecipientPermission(row: SharedByMeRow, permission: SharePermission) {
+    setRecipientBusyId(row.shareId);
+    try {
+      await updateSharePermission(supabase, row.itemId, row.toUserId, permission);
+      setRecipients((rows) => rows?.map((r) => (r.shareId === row.shareId ? { ...r, permission } : r)) ?? null);
+      showToast({ message: `${row.toEmail} now has ${permission} access`, tone: "default" });
+    } finally {
+      setRecipientBusyId(null);
+    }
+  }
 
   async function copy(text: string) {
     await navigator.clipboard.writeText(text);
@@ -108,11 +152,20 @@ export function ItemDetailScreen({ embedded = false }: ItemDetailScreenProps = {
         myUserId: profile.id,
         myPublicKey: keypair.publicKey,
         myPrivateKey: keypair.privateKey,
+        permission: sharePermission,
       });
       if (result.shared) {
-        showToast({ message: `Shared with ${shareEmail}`, tone: "success" });
+        showToast({ message: `Shared with ${shareEmail} (${sharePermission} access)`, tone: "success" });
         setShareEmail("");
+        setSharePermission("read");
         setSharing(false);
+        // Re-fetch rather than optimistically patch local state — this call
+        // may have been a fresh share OR a permission bump on an existing
+        // one (0008's dedup fallback in shareItemWithEmail), and the server
+        // is the source of truth for which.
+        fetchSharedByMe(supabase, profile.id).then((rows) =>
+          setRecipients(rows.filter((r) => r.itemId === existing.row.id)),
+        );
       } else if (result.reason === "not-found") {
         setShareError("No account found for that email.");
       } else if (result.reason === "self") {
@@ -177,7 +230,7 @@ export function ItemDetailScreen({ embedded = false }: ItemDetailScreenProps = {
         </Button>
         {existing && (
           <Button variant="secondary" onClick={() => setSharing((s) => !s)}>
-            Share
+            Share{recipients && recipients.length > 0 ? ` (${recipients.length})` : ""}
           </Button>
         )}
         {existing && (
@@ -188,18 +241,76 @@ export function ItemDetailScreen({ embedded = false }: ItemDetailScreenProps = {
       </div>
 
       {sharing && existing && (
-        <div className="flex flex-col gap-3 rounded-md border border-white/[0.08] bg-surface p-4">
-          <TextField
-            label="Share with (email)"
-            type="email"
-            value={shareEmail}
-            onChange={(e) => setShareEmail(e.target.value)}
-            error={shareError ?? undefined}
-            hint="They must already have an account. Read-only for now."
-          />
-          <Button onClick={handleShare} disabled={shareBusy || !shareEmail}>
-            {shareBusy ? "Sharing…" : "Share"}
-          </Button>
+        <div className="flex flex-col gap-4 rounded-md border border-white/[0.08] bg-surface p-4">
+          {recipients && recipients.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-white/50">Shared with</p>
+              {recipients.map((r) => (
+                <div key={r.shareId} className="flex items-center justify-between gap-2 text-sm">
+                  <span className="truncate text-white/85">{r.toEmail}</span>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <select
+                      className="rounded-sm border border-white/[0.08] bg-base px-2 py-1 text-xs text-white/85 outline-none focus:border-accent"
+                      value={r.permission}
+                      disabled={recipientBusyId === r.shareId}
+                      onChange={(e) => handleChangeRecipientPermission(r, e.target.value as SharePermission)}
+                    >
+                      <option value="read">Read</option>
+                      <option value="write">Write</option>
+                    </select>
+                    <button
+                      className="text-xs text-danger hover:underline disabled:opacity-40"
+                      disabled={recipientBusyId === r.shareId}
+                      onClick={() => handleRevokeRecipient(r.shareId)}
+                    >
+                      Revoke
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex flex-col gap-3">
+            <TextField
+              label="Share with (email)"
+              type="email"
+              value={shareEmail}
+              onChange={(e) => setShareEmail(e.target.value)}
+              error={shareError ?? undefined}
+              hint="They must already have an account. You can add more recipients any time."
+            />
+            <div className="flex flex-col gap-2">
+              <span className="text-xs font-medium text-white/85">Access level</span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className={`flex-1 rounded-sm border px-3 py-2 text-sm transition-colors ${
+                    sharePermission === "read"
+                      ? "border-accent bg-accent/10 text-accent"
+                      : "border-white/[0.08] text-white/60 hover:text-white/85"
+                  }`}
+                  onClick={() => setSharePermission("read")}
+                >
+                  Read only
+                </button>
+                <button
+                  type="button"
+                  className={`flex-1 rounded-sm border px-3 py-2 text-sm transition-colors ${
+                    sharePermission === "write"
+                      ? "border-accent bg-accent/10 text-accent"
+                      : "border-white/[0.08] text-white/60 hover:text-white/85"
+                  }`}
+                  onClick={() => setSharePermission("write")}
+                >
+                  Can edit
+                </button>
+              </div>
+            </div>
+            <Button onClick={handleShare} disabled={shareBusy || !shareEmail}>
+              {shareBusy ? "Sharing…" : "Share"}
+            </Button>
+          </div>
         </div>
       )}
 

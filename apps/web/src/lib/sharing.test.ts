@@ -11,6 +11,7 @@ import {
   wrapKey,
 } from "@password-manager/core-crypto";
 import type { LoginContent } from "@password-manager/core-domain";
+import { groupSharedByMeByItem, type SharedByMeRow } from "./sharing.js";
 
 // sharing.ts's shareItemWithEmail/fetchSharedWithMe are coupled to the live
 // Supabase client (lookupPublicKey/shareItem/listSharedWithMe are network
@@ -76,5 +77,57 @@ describe("secure sharing — full crypto protocol, sender to recipient", () => {
     // from Alice — crypto_box's authentication must catch this.
     const wrapped = await boxForRecipient(itemKey, bob.publicKey, impostor.privateKey);
     await expect(openBox(wrapped, alice.publicKey, bob.privateKey)).rejects.toThrow();
+  });
+
+  it("multi-recipient: the same item key can be independently boxed to several recipients, and each opens only their own box", async () => {
+    const alice = await generateKeypair();
+    const bob = await generateKeypair();
+    const carol = await generateKeypair();
+    const itemKey = await generateRandomKey();
+
+    const wrappedForBob = await boxForRecipient(itemKey, bob.publicKey, alice.privateKey);
+    const wrappedForCarol = await boxForRecipient(itemKey, carol.publicKey, alice.privateKey);
+
+    const bobsKey = await openBox(wrappedForBob, alice.publicKey, bob.privateKey);
+    const carolsKey = await openBox(wrappedForCarol, alice.publicKey, carol.privateKey);
+
+    expect(await toBase64(bobsKey)).toEqual(await toBase64(itemKey));
+    expect(await toBase64(carolsKey)).toEqual(await toBase64(itemKey));
+    // Neither recipient's box works with the other's keypair — sharing with
+    // more people doesn't loosen this.
+    await expect(openBox(wrappedForBob, alice.publicKey, carol.privateKey)).rejects.toThrow();
+    await expect(openBox(wrappedForCarol, alice.publicKey, bob.privateKey)).rejects.toThrow();
+  });
+});
+
+describe("groupSharedByMeByItem", () => {
+  function row(overrides: Partial<SharedByMeRow>): SharedByMeRow {
+    return {
+      shareId: "share-1",
+      itemId: "item-1",
+      toUserId: "user-1",
+      toEmail: "someone@example.com",
+      permission: "read",
+      createdAt: "2026-01-01T00:00:00Z",
+      ...overrides,
+    };
+  }
+
+  it("groups multiple recipients of the same item together, preserving order, and keeps different items separate", () => {
+    const rows: SharedByMeRow[] = [
+      row({ shareId: "s1", itemId: "item-a", toEmail: "bob@example.com", permission: "read" }),
+      row({ shareId: "s2", itemId: "item-b", toEmail: "carol@example.com", permission: "write" }),
+      row({ shareId: "s3", itemId: "item-a", toEmail: "dave@example.com", permission: "write" }),
+    ];
+
+    const grouped = groupSharedByMeByItem(rows);
+
+    expect(Array.from(grouped.keys())).toEqual(["item-a", "item-b"]);
+    expect(grouped.get("item-a")?.map((r) => r.toEmail)).toEqual(["bob@example.com", "dave@example.com"]);
+    expect(grouped.get("item-b")?.map((r) => r.toEmail)).toEqual(["carol@example.com"]);
+  });
+
+  it("returns an empty map for no shares", () => {
+    expect(groupSharedByMeByItem([]).size).toBe(0);
   });
 });

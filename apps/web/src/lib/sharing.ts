@@ -9,8 +9,11 @@ import {
   lookupPublicKey,
   revokeShare,
   shareItem,
+  updateSharePermission,
+  UNIQUE_VIOLATION,
   type Database,
   type PasswordManagerClient,
+  type SharePermission,
 } from "@password-manager/api-client";
 import { vaultItemContentSchema, type VaultItemContent } from "@password-manager/core-domain";
 
@@ -18,9 +21,14 @@ export type ShareOutcome =
   | { shared: true }
   | { shared: false; reason: "not-found" | "self" | "error" };
 
-/** Shares one vault item with another user by email. Unwraps the item's key
- * with the sender's own VMK, then re-wraps it to the recipient's public key
- * via `crypto_box` — the server never sees the plaintext item key. */
+/** Shares one vault item with another user by email — build plan §5's "basic
+ * 1:1 secure sharing" plus its fast-follow ("write-permission +
+ * multi-recipient"): this is just as fine to call again for a second, third,
+ * … recipient on the same item (multi-recipient is inherent to `shared_items`
+ * being one row per item+recipient, not a UI limitation), and `permission`
+ * lets the caller grant read or write access. Unwraps the item's key with
+ * the sender's own VMK, then re-wraps it to the recipient's public key via
+ * `crypto_box` — the server never sees the plaintext item key. */
 export async function shareItemWithEmail(
   client: PasswordManagerClient,
   params: {
@@ -31,12 +39,14 @@ export async function shareItemWithEmail(
     myUserId: string;
     myPublicKey: string;
     myPrivateKey: Uint8Array;
+    permission?: SharePermission;
   },
 ): Promise<ShareOutcome> {
   const lookup = await lookupPublicKey(client, params.recipientEmail);
   if (!lookup.found) return { shared: false, reason: "not-found" };
   if (lookup.userId === params.myUserId) return { shared: false, reason: "self" };
 
+  const permission = params.permission ?? "read";
   try {
     const itemKey = await unwrapKey(params.itemWrappedKey, params.vmk);
     const wrappedForRecipient = await boxForRecipient(itemKey, lookup.publicKey, params.myPrivateKey);
@@ -45,36 +55,82 @@ export async function shareItemWithEmail(
       fromUserId: params.myUserId,
       fromPublicKey: params.myPublicKey,
       toUserId: lookup.userId,
+      toEmail: params.recipientEmail.trim().toLowerCase(),
       wrappedItemKeyForRecipient: wrappedForRecipient,
+      permission,
     });
     return { shared: true };
-  } catch {
+  } catch (err) {
+    // Already shared with this recipient (0008's partial unique index) —
+    // the caller's intent ("share with them") is better served by updating
+    // the existing share's permission than by erroring out.
+    if (isUniqueViolation(err)) {
+      try {
+        await updateSharePermission(client, params.itemId, lookup.userId, permission);
+        return { shared: true };
+      } catch {
+        return { shared: false, reason: "error" };
+      }
+    }
     return { shared: false, reason: "error" };
   }
 }
 
-export { revokeShare };
+function isUniqueViolation(err: unknown): boolean {
+  return typeof err === "object" && err !== null && "code" in err && (err as { code?: unknown }).code === UNIQUE_VIOLATION;
+}
+
+export { revokeShare, updateSharePermission };
 
 export interface SharedByMeRow {
   shareId: string;
   itemId: string;
   toUserId: string;
-  permission: "read" | "write";
+  toEmail: string;
+  permission: SharePermission;
   createdAt: string;
 }
 
+/** Everything the caller has shared out, across every item and every
+ * recipient — grouping by `itemId` (see `groupSharedByMeByItem`) is what
+ * turns this flat list into the "who has access to this item" view the UI
+ * needs for multi-recipient sharing. */
 export async function fetchSharedByMe(client: PasswordManagerClient, myUserId: string): Promise<SharedByMeRow[]> {
   const rows = await listSharedByMe(client, myUserId);
   return rows
     .filter((r) => !r.revoked_at)
-    .map((r) => ({ shareId: r.id, itemId: r.item_id, toUserId: r.to_user_id, permission: r.permission, createdAt: r.created_at }));
+    .map((r) => ({
+      shareId: r.id,
+      itemId: r.item_id,
+      toUserId: r.to_user_id,
+      toEmail: r.to_email,
+      permission: r.permission,
+      createdAt: r.created_at,
+    }));
+}
+
+/** Groups a flat `fetchSharedByMe` result by item, preserving each item's
+ * recipients in share-creation order — the shape the "shared by me" screen
+ * actually renders (one card per item, one row per recipient). */
+export function groupSharedByMeByItem(rows: SharedByMeRow[]): Map<string, SharedByMeRow[]> {
+  const byItem = new Map<string, SharedByMeRow[]>();
+  for (const row of rows) {
+    const existing = byItem.get(row.itemId);
+    if (existing) existing.push(row);
+    else byItem.set(row.itemId, [row]);
+  }
+  return byItem;
 }
 
 export interface SharedWithMeItem {
   shareId: string;
   row: Database["public"]["Tables"]["vault_items"]["Row"];
   content: VaultItemContent;
-  permission: "read" | "write";
+  permission: SharePermission;
+  /** The item's raw per-item key, recovered via `openBox`. Kept around (not
+   * just used to decrypt and discarded) so a write-permission recipient can
+   * save an edit without re-deriving it — see `encryptSharedItemUpdate`. */
+  itemKey: Uint8Array;
 }
 
 /** Fetches and decrypts everything currently shared with the caller. Opens
@@ -101,7 +157,7 @@ export async function fetchSharedWithMe(
       const itemKey = await openBox(share.wrapped_item_key, share.from_public_key, myPrivateKey);
       const plaintext = await decryptItem(row.content, itemKey);
       const content = vaultItemContentSchema.parse(JSON.parse(plaintext));
-      results.push({ shareId: share.id, row, content, permission: share.permission });
+      results.push({ shareId: share.id, row, content, permission: share.permission, itemKey });
     } catch {
       // Skip — shouldn't happen with a valid keypair, but one bad share
       // (e.g. a race with revocation) must not break the rest of the list.

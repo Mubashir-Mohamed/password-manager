@@ -168,6 +168,10 @@ export interface Database {
           // 0005_shared_items_sender_public_key.sql for why this is
           // denormalized here rather than looked up from profiles.
           from_public_key: string;
+          // Recipient's email at share time — see
+          // 0008_shared_items_recipient_email_and_dedup.sql for why this is
+          // denormalized here rather than looked up from profiles.
+          to_email: string;
           permission: SharePermission;
           created_at: string;
           revoked_at: string | null;
@@ -179,10 +183,15 @@ export interface Database {
           to_user_id: string;
           wrapped_item_key: WrappedPayloadRow;
           from_public_key: string;
+          to_email: string;
           permission?: SharePermission;
         };
         Update: {
           revoked_at?: string | null;
+          // 0008's partial unique index (one active share per item+recipient)
+          // means "share again at a different permission level" is an UPDATE
+          // of this column on the existing row, not a second INSERT.
+          permission?: SharePermission;
         };
         Relationships: [];
       };
